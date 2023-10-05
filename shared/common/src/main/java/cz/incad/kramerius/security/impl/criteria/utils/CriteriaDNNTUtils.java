@@ -4,6 +4,7 @@ import cz.incad.kramerius.SolrAccess;
 import cz.incad.kramerius.security.*;
 import cz.incad.kramerius.security.impl.criteria.*;
 import cz.incad.kramerius.security.licenses.License;
+import cz.incad.kramerius.security.utils.LicensesCriteriaList;
 import cz.incad.kramerius.utils.conf.KConfiguration;
 import cz.incad.kramerius.utils.solr.SolrUtils;
 import org.w3c.dom.Document;
@@ -41,30 +42,30 @@ public class CriteriaDNNTUtils {
         }
     }
 
-    // allowed by dnntlabel right
-
-    public static boolean allowedByReadDNNTLabelsRight(RightsReturnObject obj, License license) {
+    // allowed by license
+    public static boolean allowedByReadLicenseRight(RightsReturnObject obj, License license) {
         if (obj.getRight() != null && obj.getRight().getCriteriumWrapper() != null) {
-            if (obj.getRight().getCriteriumWrapper().getRightCriterium().getQName().equals(ReadDNNTLabels.class.getName()) ||
-                    obj.getRight().getCriteriumWrapper().getRightCriterium().getQName().equals(ReadDNNTLabelsIPFiltered.class.getName())) {
-                String s = obj.getEvaluateInfoMap().get(ReadDNNTLabels.PROVIDED_BY_DNNT_LABEL);
-                return license != null && license.getName() != null && s != null && s.equals(license.getName());
+            if (LicensesCriteriaList.NAMES.contains(obj.getRight().getCriteriumWrapper().getRightCriterium().getQName())){
+
+                String providedByLicense = obj.getEvaluateInfoMap().get(ReadDNNTLabels.PROVIDED_BY_DNNT_LICENSE);
+                if (providedByLicense == null) {
+                    providedByLicense = obj.getEvaluateInfoMap().get(ReadDNNTLabels.PROVIDED_BY_DNNT_LABEL);
+                }
+
+                return license != null && license.getName() != null && providedByLicense != null && providedByLicense.equals(license.getName());
             }
         }
         return false;
     }
 
 
-    // allowed by dnnt right
+    
     public static boolean allowedByReadDNNTFlagRight(RightsReturnObject obj) {
+        List<String> dnntLicenses = Arrays.asList("dnnto","dnntt");
         if (obj.getRight() != null && obj.getRight().getCriteriumWrapper() != null) {
-            if (    /*obj.getRight().getCriteriumWrapper().getRightCriterium().getQName().equals(ReadDNNTFlag.class.getName()) ||
-                    obj.getRight().getCriteriumWrapper().getRightCriterium().getQName().equals(ReadDNNTFlagIPFiltered.class.getName()) ||*/
-                    
-                    obj.getRight().getCriteriumWrapper().getRightCriterium().getQName().equals(ReadDNNTLabels.class.getName()) ||
-                    obj.getRight().getCriteriumWrapper().getRightCriterium().getQName().equals(ReadDNNTLabelsIPFiltered.class.getName())
-            ) {
-                return true;
+            if (   LicensesCriteriaList.NAMES.contains(obj.getRight().getCriteriumWrapper().getRightCriterium().getQName())) {
+                License license = obj.getRight().getCriteriumWrapper().getLicense();
+                return dnntLicenses.contains(license.getName());
             }
         }
         return false;

@@ -3,7 +3,7 @@
 <!--
 see https://docs.google.com/spreadsheets/d/1DoDnSIGPqPnYbb0U2RSNLKm9eAY2FQNimJyTPeQsC2A
 -->
-<schema name="kramerius" version="1.4">
+<schema name="kramerius" version="18">
     <types>
         <fieldType name="string" class="solr.StrField" sortMissingLast="true" omitNorms="true"/>
         <fieldType name="boolean" class="solr.BoolField" sortMissingLast="true" omitNorms="true"/>
@@ -508,8 +508,14 @@ see https://docs.google.com/spreadsheets/d/1DoDnSIGPqPnYbb0U2RSNLKm9eAY2FQNimJyT
         <field name="authors.search" type="text_fgs" indexed="true" stored="true" multiValued="true" docValues="false"/>
         <field name="authors.facet" type="string" indexed="true" stored="true" multiValued="true" docValues="true"/>
 
+
         <!--hlavni nazev-->
         <field name="title.search" type="text_fgs" indexed="true" stored="true" multiValued="false" docValues="false"/>
+
+		<!-- localized collection titles -->
+		<dynamicField name="title.search_*" type="text_fgs" indexed="true"  stored="true" multiValued="true" docValues="false"/>
+
+
         <!--hlavni nazev (bez hodnoty nonSort)-->
         <field name="title.sort" type="string" indexed="true" stored="true" multiValued="false" docValues="true"/>
         <!--vsechny nazvy (vcetne hlavniho)-->
@@ -663,6 +669,9 @@ see https://docs.google.com/spreadsheets/d/1DoDnSIGPqPnYbb0U2RSNLKm9eAY2FQNimJyT
 
         <!--kratky popis sbirky-->
         <field name="collection.desc" type="string" indexed="true" stored="true" multiValued="true"/>
+		<!-- localized collection desc -->
+		<dynamicField name="collection.desc_*" type="text_general_not_lemmatized" indexed="true"  stored="true" multiValued="true" docValues="false"/>
+
         <field name="collection.is_standalone" type="boolean" indexed="true" stored="true"/>
 
         <!--OTHER-->
@@ -673,10 +682,7 @@ see https://docs.google.com/spreadsheets/d/1DoDnSIGPqPnYbb0U2RSNLKm9eAY2FQNimJyT
 
         <!-- text ocr -->
         <field name="text_ocr" type="text_general_not_lemmatized" indexed="true" stored="true" storeOffsetsWithPositions="true"/>
-        <field name="text_ocr.lemmatized" type="text_general_lemmatized" indexed="true" stored="false" storeOffsetsWithPositions="true"/>
-        <field name="text_ocr.lemmatized_ascii" type="text_general_lemmatized_ascii" indexed="true" stored="false" storeOffsetsWithPositions="true"/>
-        <field name="text_ocr.lemmatized_nostopwords" type="text_general_lemmatized_no_stopwords" indexed="true" stored="false"
-               storeOffsetsWithPositions="true"/>
+		
 
 
         <!-- licenses (formerly dnnt labels)-->
@@ -695,13 +701,6 @@ see https://docs.google.com/spreadsheets/d/1DoDnSIGPqPnYbb0U2RSNLKm9eAY2FQNimJyT
         <copyField source="licenses" dest="licenses.facet"/>
 			
 
-
-        <!-- Lemmatized is disabled now
-        <copyField source="text_ocr" dest="text_ocr.lemmatized"/>
-        <copyField source="text_ocr" dest="text_ocr.lemmatized_ascii"/>
-
-        <copyField source="text_ocr" dest="text_ocr.lemmatized_nostopwords"/>
-        -->
 
     </fields>
 

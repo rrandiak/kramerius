@@ -3,6 +3,7 @@ package cz.incad.kramerius.rest.apiNew.client.v70;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
 
+import cz.incad.kramerius.ObjectPidsPath;
 import cz.incad.kramerius.SolrAccess;
 import cz.incad.kramerius.audio.AudioFormat;
 import cz.incad.kramerius.audio.AudioStreamForwardingHelper;
@@ -11,26 +12,34 @@ import cz.incad.kramerius.fedora.om.RepositoryException;
 import cz.incad.kramerius.repository.ExtractStructureHelper;
 import cz.incad.kramerius.repository.KrameriusRepositoryApi;
 import cz.incad.kramerius.repository.utils.Utils;
+import cz.incad.kramerius.rest.api.exceptions.ActionNotAllowed;
 import cz.incad.kramerius.rest.apiNew.client.v70.epub.EPubFileTypes;
 import cz.incad.kramerius.rest.apiNew.client.v70.utils.ProvidedLicensesUtils;
 import cz.incad.kramerius.rest.apiNew.exceptions.BadRequestException;
 import cz.incad.kramerius.rest.apiNew.exceptions.ForbiddenException;
 import cz.incad.kramerius.rest.apiNew.exceptions.InternalErrorException;
 import cz.incad.kramerius.rest.apiNew.exceptions.NotFoundException;
+import cz.incad.kramerius.rest.utils.IIIFUtils;
 import cz.incad.kramerius.security.RightsResolver;
 import cz.incad.kramerius.security.Role;
+import cz.incad.kramerius.security.SecuredActions;
 import cz.incad.kramerius.security.User;
 import cz.incad.kramerius.service.replication.FormatType;
+import cz.incad.kramerius.statistics.accesslogs.AggregatedAccessLogs;
 import cz.incad.kramerius.utils.ApplicationURL;
 import cz.incad.kramerius.utils.Dom4jUtils;
 import cz.incad.kramerius.utils.FedoraUtils;
+import cz.incad.kramerius.utils.RESTHelper;
+import cz.incad.kramerius.utils.XMLUtils;
 import cz.incad.kramerius.utils.imgs.ImageMimeType;
 import cz.incad.kramerius.utils.java.Pair;
 import org.apache.commons.io.IOUtils;
 import org.dom4j.Document;
 import org.dom4j.Element;
 import org.dom4j.Node;
+import org.json.JSONException;
 import org.json.JSONObject;
+import org.xml.sax.SAXException;
 
 import javax.inject.Named;
 import javax.servlet.http.HttpServletRequest;
@@ -41,6 +50,8 @@ import javax.ws.rs.core.PathSegment;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.StreamingOutput;
 import javax.ws.rs.core.UriInfo;
+import javax.ws.rs.core.Response.ResponseBuilder;
+import javax.xml.parsers.ParserConfigurationException;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -51,7 +62,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
+import java.net.HttpURLConnection;
+import java.net.URLDecoder;
 import java.net.URLEncoder;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -63,6 +77,10 @@ import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
+
+import com.sun.jersey.api.client.Client;
+import com.sun.jersey.api.client.ClientResponse;
+
 
 /**
  * @see cz.incad.kramerius.rest.api.k5.client.item.ItemResource
@@ -108,6 +126,7 @@ public class ItemsResource extends ClientApiResource {
     // GET/HEAD {pid}/audio/mp3
     // GET/HEAD {pid}/audio/ogg
     // GET/HEAD {pid}/audio/wav
+    // 
 
     // Specificke endpointy; funguji pouze pro konkretni mimethype 
     // GET/HEAD {pid}/specific/epub
@@ -146,6 +165,29 @@ public class ItemsResource extends ClientApiResource {
 
     @Inject
     RightsResolver rightsResolver;
+    
+    @Inject
+    AggregatedAccessLogs accessLog;
+    
+    
+    private Client c;
+
+    public ItemsResource() {
+        super();
+        this.c = Client.create();
+    }
+
+    
+    public static Map<String, String> IIIF_SUPPORTED_MIMETYPES = new HashMap<>();
+    static  {
+        ItemsResource.IIIF_SUPPORTED_MIMETYPES.put("jpg", "image/jpeg");
+        ItemsResource.IIIF_SUPPORTED_MIMETYPES.put("tif", "image/tiff");
+        ItemsResource.IIIF_SUPPORTED_MIMETYPES.put("png", "image/png");
+        ItemsResource.IIIF_SUPPORTED_MIMETYPES.put("jp2", "image/jp2");
+        ItemsResource.IIIF_SUPPORTED_MIMETYPES.put("pdf", "application/pdf");
+        ItemsResource.IIIF_SUPPORTED_MIMETYPES.put("webp", "image/webp");
+    }
+
     
 
     @HEAD
@@ -289,33 +331,6 @@ public class ItemsResource extends ClientApiResource {
 
     
 
-//    private void childrenInSearchIndex(Map<String, Integer> relsExtSort, List<String> childrenPids)
-//            throws IOException, UnsupportedEncodingException {
-//
-//        int numberOfBatches = childrenPids.size() / SEARCH_INDEX_BATCH_SIZE;
-//        numberOfBatches += childrenPids.size() % SEARCH_INDEX_BATCH_SIZE == 0 ? 0 : 1;
-//        
-//        for (int i = 0; i < numberOfBatches; i++) {
-//            int start = i*SEARCH_INDEX_BATCH_SIZE;
-//            int stop = Math.min( (i+1)*SEARCH_INDEX_BATCH_SIZE, childrenPids.size());
-//            
-//            List<String> ipids = childrenPids.subList(start, stop);
-//
-//            String collect = ipids.stream().map(p-> {
-//                String retVal = "\"" + p + "\"";
-//                return retVal;
-//            }).collect(Collectors.joining(" OR "));
-//
-//            JSONObject solrResponseJson = solrAccess.requestWithSelectReturningJson("q=pid:("+URLEncoder.encode(collect, "UTF-8")+")"+ "&fl="+URLEncoder.encode("pid rels_ext_index.sort","UTF-8"));
-//            JSONArray docs = solrResponseJson.getJSONObject("response").getJSONArray("docs");
-//            for (int j = 0; j < docs.length(); j++) {
-//                JSONObject hit = docs.getJSONObject(j);
-//                String hitPid = hit.optString("pid");
-//                int hitRelsExt = hit.optInt("rels_ext_index.sort");
-//                relsExtSort.put(hitPid, hitRelsExt);
-//            }
-//        }
-//    }
 
     private Object extractImageSourceInfo(String pid) throws IOException, RepositoryException {
         JSONObject json = new JSONObject();
@@ -695,7 +710,7 @@ public class ItemsResource extends ClientApiResource {
             KrameriusRepositoryApi.KnownDatastreams dsId = KrameriusRepositoryApi.KnownDatastreams.AUDIO_MP3;
             checkObjectAndDatastreamExist(pid, dsId);
             checkUserIsAllowedToReadDatastream(pid, dsId); //autorizace podle zdroje přístupu, POLICY apod. (by JSESSIONID)
-            if (AUDIO_SERVE_WITH_FORWARDING) {
+            if (shouldUseAudioServer(pid, AudioFormat.MP3)) {
                 HttpServletRequest request = this.requestProvider.get();
                 AudioStreamId audioStreamId = new AudioStreamId(pid, AudioFormat.MP3);
                 Response.ResponseBuilder builder = Response.ok(); //status code will be replaced
@@ -716,6 +731,16 @@ public class ItemsResource extends ClientApiResource {
         }
     }
 
+    private boolean shouldUseAudioServer(String pid, AudioFormat audioFormat) {
+        try {
+            String type = krameriusRepositoryApi.getLowLevelApi().getTypeOfDatastream(pid, audioFormat.name());
+            return type != null && type.equals("INDIRECT");
+        } catch (RepositoryException | IOException e) {
+            LOGGER.log(Level.SEVERE,e.getMessage(),e);
+            return false;
+        }
+    }   
+
     /***
      * Vrací obsah datastreamu MP3 tohoto objektu
      */
@@ -728,15 +753,15 @@ public class ItemsResource extends ClientApiResource {
             KrameriusRepositoryApi.KnownDatastreams dsId = KrameriusRepositoryApi.KnownDatastreams.AUDIO_MP3;
             checkObjectAndDatastreamExist(pid, dsId);
             checkUserIsAllowedToReadDatastream(pid, dsId); //autorizace podle zdroje přístupu, POLICY apod. (by JSESSIONID)
-            if (AUDIO_SERVE_WITH_FORWARDING) {
+            if (shouldUseAudioServer(pid, AudioFormat.MP3)) {
                 HttpServletRequest request = this.requestProvider.get();
                 AudioStreamId audioStreamId = new AudioStreamId(pid, AudioFormat.MP3);
                 Response.ResponseBuilder builder = Response.ok(); //status code will be replaced
                 audioHelper.forwardHttpGET(audioStreamId, request, builder);
                 return builder.build();
             } else {
-                String mimeType = krameriusRepositoryApi.getAudioWavMimetype(pid);
-                InputStream is = krameriusRepositoryApi.getAudioWav(pid);
+                String mimeType = krameriusRepositoryApi.getAudioMp3Mimetype(pid);
+                InputStream is = krameriusRepositoryApi.getAudioMp3(pid);
                 return getAudioDataFromAkubra(mimeType, is, pid);
             }
         } catch (WebApplicationException e) {
@@ -799,7 +824,7 @@ public class ItemsResource extends ClientApiResource {
             KrameriusRepositoryApi.KnownDatastreams dsId = KrameriusRepositoryApi.KnownDatastreams.AUDIO_OGG;
             checkObjectAndDatastreamExist(pid, dsId);
             checkUserIsAllowedToReadDatastream(pid, dsId); //autorizace podle zdroje přístupu, POLICY apod. (by JSESSIONID)
-            if (AUDIO_SERVE_WITH_FORWARDING) {
+            if (shouldUseAudioServer(pid, AudioFormat.OGG)) {
                 HttpServletRequest request = this.requestProvider.get();
                 AudioStreamId audioStreamId = new AudioStreamId(pid, AudioFormat.OGG);
                 Response.ResponseBuilder builder = Response.ok(); //status code will be replaced
@@ -832,15 +857,15 @@ public class ItemsResource extends ClientApiResource {
             KrameriusRepositoryApi.KnownDatastreams dsId = KrameriusRepositoryApi.KnownDatastreams.AUDIO_OGG;
             checkObjectAndDatastreamExist(pid, dsId);
             checkUserIsAllowedToReadDatastream(pid, dsId); //autorizace podle zdroje přístupu, POLICY apod. (by JSESSIONID)
-            if (AUDIO_SERVE_WITH_FORWARDING) {
+            if (shouldUseAudioServer(pid, AudioFormat.OGG)) {
                 HttpServletRequest request = this.requestProvider.get();
                 AudioStreamId audioStreamId = new AudioStreamId(pid, AudioFormat.OGG);
                 Response.ResponseBuilder builder = Response.ok(); //status code will be replaced
                 audioHelper.forwardHttpGET(audioStreamId, request, builder);
                 return builder.build();
             } else {
-                String mimeType = krameriusRepositoryApi.getAudioWavMimetype(pid);
-                InputStream is = krameriusRepositoryApi.getAudioWav(pid);
+                String mimeType = krameriusRepositoryApi.getAudioOggMimetype(pid);
+                InputStream is = krameriusRepositoryApi.getAudioOgg(pid);
                 return getAudioDataFromAkubra(mimeType, is, pid);
             }
         } catch (WebApplicationException e) {
@@ -859,7 +884,7 @@ public class ItemsResource extends ClientApiResource {
             KrameriusRepositoryApi.KnownDatastreams dsId = KrameriusRepositoryApi.KnownDatastreams.AUDIO_WAV;
             checkObjectAndDatastreamExist(pid, dsId);
             checkUserIsAllowedToReadDatastream(pid, dsId); //autorizace podle zdroje přístupu, POLICY apod. (by JSESSIONID)
-            if (AUDIO_SERVE_WITH_FORWARDING) {
+            if (shouldUseAudioServer(pid, AudioFormat.WAV)) {
                 HttpServletRequest request = this.requestProvider.get();
                 AudioStreamId audioStreamId = new AudioStreamId(pid, AudioFormat.WAV);
                 Response.ResponseBuilder builder = Response.ok(); //status code will be replaced
@@ -892,7 +917,7 @@ public class ItemsResource extends ClientApiResource {
             KrameriusRepositoryApi.KnownDatastreams dsId = KrameriusRepositoryApi.KnownDatastreams.AUDIO_WAV;
             checkObjectAndDatastreamExist(pid, dsId);
             checkUserIsAllowedToReadDatastream(pid, dsId); //autorizace podle zdroje přístupu, POLICY apod. (by JSESSIONID)
-            if (AUDIO_SERVE_WITH_FORWARDING) {
+            if (shouldUseAudioServer(pid, AudioFormat.WAV)) {
                 HttpServletRequest request = this.requestProvider.get();
                 AudioStreamId audioStreamId = new AudioStreamId(pid, AudioFormat.WAV);
                 Response.ResponseBuilder builder = Response.ok(); //status code will be replaced
@@ -911,7 +936,105 @@ public class ItemsResource extends ClientApiResource {
         }
     }
 
+    //@Path("{pid}/image/zoomify/ImageProperties.xml")
+
+
+    @GET
+    //@Path("iiif/{pid}/info.json")
+    @Path("{pid}/image/iiif/info.json")
+    @Produces("application/ld+json")
+    public Response iiiFManifest(@PathParam("pid") String pid) {
+        try {
+            pid = URLDecoder.decode(pid, "UTF-8");
+            checkUserIsAllowedToReadObject(pid); 
+            reportAccess( pid, null);
+            InputStream stream = krameriusRepositoryApi.getLowLevelApi().getLatestVersionOfDatastream(pid, "RELS-EXT");
+            org.w3c.dom.Document relsExt = XMLUtils.parseDocument(stream, true);
+            String u = IIIFUtils.iiifImageEndpoint(relsExt);
+            if (u != null) {
+                if (!u.endsWith("/")) { u = u+"/"; }
+                u = u +"info.json";
+
+                HttpURLConnection con = (HttpURLConnection) RESTHelper.openConnection(u, "", "");
+                InputStream inputStream = con.getInputStream();
+                String json = IOUtils.toString(inputStream, Charset.defaultCharset());
+                JSONObject object = new JSONObject(json);
+                HttpServletRequest req = this.requestProvider.get();
+                String urlRequest = req.getRequestURL().toString();
+                object.put("@id", urlRequest.substring(0, urlRequest.lastIndexOf('/')));
+                
+                return Response.ok().entity(object.toString()).build();
+
+            } else {
+                throw new BadRequestException("bad request");
+            }
+        } catch (JSONException | RepositoryException | IOException | ParserConfigurationException
+                | SAXException e) {
+            LOGGER.log(Level.SEVERE, e.getMessage(), e);
+            throw new InternalErrorException(e.getMessage());
+        }
+    }
     
+    @GET
+    @Produces("image/jpeg")
+    @Path("{pid}/image/iiif/{region}/{size}/{rotation}/{qualityformat}")
+    public Response tile(@PathParam("pid") String pid, 
+            @PathParam("region") String region, 
+            @PathParam("size") String size,
+            @PathParam("rotation") String rotation,
+            @PathParam("qualityformat") String qf
+            ) {
+        try {
+            InputStream stream = krameriusRepositoryApi.getLowLevelApi().getLatestVersionOfDatastream(pid, "RELS-EXT");
+            org.w3c.dom.Document relsExt = XMLUtils.parseDocument(stream, true);
+            String u = IIIFUtils.iiifImageEndpoint(relsExt);
+            if(u != null) {
+
+                String defaultMime = IIIF_SUPPORTED_MIMETYPES.get("jpg");
+
+                StringBuilder url = new StringBuilder(u);
+                if (!u.endsWith("/")) { url.append("/"); }
+                url.append(String.format("%s/%s/%s/%s", region, size, rotation,qf));
+     
+                String mime = defaultMime;
+                String[] splited = qf.split("\\.");
+                if (splited.length > 1) {
+                    mime =  IIIF_SUPPORTED_MIMETYPES.containsKey(splited[1]) ? IIIF_SUPPORTED_MIMETYPES.get(splited[1]) :  defaultMime;
+                }
+                LOGGER.fine(String.format("Copy tile from IIIF server %s", url.toString()));
+                ResponseBuilder builder = Response.ok();
+              
+                IIIFUtils.copyFromImageServer(this.c, url.toString(),new ByteArrayOutputStream(), builder, mime);
+                
+                return builder.build();
+           } else {
+               throw new BadRequestException("bad request");
+           }
+
+        } catch (WebApplicationException e) {
+            throw e;
+        } catch (Throwable e) {
+            LOGGER.log(Level.SEVERE, e.getMessage(), e);
+            throw new InternalErrorException(e.getMessage());
+        }
+    }
+
+    
+
+    
+    
+    private void reportAccess(String pid, String streamName) {
+        try {
+            if (this.accessLog != null) {
+                this.accessLog.reportAccess(pid, streamName);
+            } else {
+                this.accessLog.reportAccess(pid, null);
+            }
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Can't write statistic records for " + pid + ", stream name: " + streamName, e);
+        }
+    }
+
     // =========== EPub specific endpoints
 
     @HEAD
