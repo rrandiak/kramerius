@@ -840,20 +840,20 @@ public class ItemsResource extends ClientApiResource {
     @Path("{pid}/image/thumb")
     public Response getImgThumb(@PathParam("pid") String pid) {
         long startTime = System.nanoTime();
-        LOGGER.log(Level.FINE, "Start processing getImgThumb for PID: {0}", pid);
+        LOGGER.log(Level.INFO, "Start processing getImgThumb for PID: {0}", pid);
 
         try {
             long step1Time = System.nanoTime();
             checkSupportedObjectPid(pid);
-            LOGGER.log(Level.FINE, "Checked supported object PID in {0} ms", (System.nanoTime() - step1Time) / 1_000_000);
+            LOGGER.log(Level.INFO, "Checked supported object PID in {0} ms", (System.nanoTime() - step1Time) / 1_000_000);
 
             long step2Time = System.nanoTime();
             checkObjectExists(pid);
-            LOGGER.log(Level.FINE, "Checked object existence in {0} ms", (System.nanoTime() - step2Time) / 1_000_000);
+            LOGGER.log(Level.INFO, "Checked object existence in {0} ms", (System.nanoTime() - step2Time) / 1_000_000);
 
             long step3Time = System.nanoTime();
             Pair<InputStream, String> imgThumb = getFirstAvailableImgThumb(pid);
-            LOGGER.log(Level.FINE, "Retrieved first available thumbnail in {0} ms", (System.nanoTime() - step3Time) / 1_000_000);
+            LOGGER.log(Level.INFO, "Retrieved first available thumbnail in {0} ms", (System.nanoTime() - step3Time) / 1_000_000);
 
             if (imgThumb == null) {
                 LOGGER.log(Level.WARNING, "No image/thumb available for PID: {0}", pid);
@@ -865,10 +865,10 @@ public class ItemsResource extends ClientApiResource {
                     IOUtils.copy(imgThumb.getFirst(), output);
                     IOUtils.closeQuietly(imgThumb.getFirst());
                 };
-                LOGGER.log(Level.FINE, "Prepared response stream in {0} ms", (System.nanoTime() - responseTime) / 1_000_000);
+                LOGGER.log(Level.INFO, "Prepared response stream in {0} ms", (System.nanoTime() - responseTime) / 1_000_000);
 
                 long totalTime = System.nanoTime();
-                LOGGER.log(Level.FINE, "Completed getImgThumb for PID: {0} in {1} ms", new Object[]{pid, (totalTime - startTime) / 1_000_000});
+                LOGGER.log(Level.INFO, "Completed getImgThumb for PID: {0} in {1} ms", new Object[]{pid, (totalTime - startTime) / 1_000_000});
 
                 return Response.ok().entity(stream).type(imgThumb.getSecond()).build();
             }
