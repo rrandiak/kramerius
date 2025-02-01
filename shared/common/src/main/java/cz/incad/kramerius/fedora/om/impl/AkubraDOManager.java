@@ -200,10 +200,15 @@ public class AkubraDOManager {
     }
 
     private DigitalObject readObjectFromStorageOrCache(String pid, boolean useCache) throws IOException {
+        long startTime = System.nanoTime();
+        LOGGER.log(Level.INFO, "Start processing readObjectFromStorageOrCache for PID: {0}", pid);
         DigitalObject retval = useCache ? objectCache.get(pid) : null;
         if (retval == null) {
             Object obj = null;
+            long stepTime = System.nanoTime();
             Lock lock = getReadLock(pid);
+            LOGGER.log(Level.INFO, "Get read lock in {0} ms", (System.nanoTime() - stepTime) / 1_000_000);
+            stepTime = System.nanoTime();
             try (InputStream inputStream = this.storage.retrieveObject(pid);){
                 synchronized (unmarshaller) {
                     obj = unmarshaller.unmarshal(inputStream);
@@ -213,13 +218,20 @@ public class AkubraDOManager {
             } catch (Exception e) {
                 throw new IOException(e);
             } finally {
+                LOGGER.log(Level.INFO, "Read object from storage in {0} ms", (System.nanoTime() - stepTime) / 1_000_000);
+                stepTime = System.nanoTime();
                 lock.unlock();
+                LOGGER.log(Level.INFO, "Free read lock in {0} ms", (System.nanoTime() - stepTime) / 1_000_000);
             }
+            stepTime = System.nanoTime();
             retval = (DigitalObject) obj;
             if (useCache) {
                 objectCache.put(pid, retval);
             }
+            LOGGER.log(Level.INFO, "Put object to cache in {0} ms", (System.nanoTime() - stepTime) / 1_000_000);
         }
+        long totalTime = System.nanoTime();
+        LOGGER.log(Level.INFO, "Completed readObjectFromStorageOrCache for PID: {0} in {1} ms", new Object[]{pid, (totalTime - startTime) / 1_000_000});
         return retval;
     }
 
