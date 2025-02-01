@@ -210,15 +210,17 @@ public class AkubraDOManager {
             LOGGER.log(Level.INFO, "Get read lock in {0} ms", (System.nanoTime() - stepTime) / 1_000_000);
             stepTime = System.nanoTime();
             try (InputStream inputStream = this.storage.retrieveObject(pid);){
+                LOGGER.log(Level.INFO, "Read object from storage in {0} ms", (System.nanoTime() - stepTime) / 1_000_000);
+                stepTime = System.nanoTime();
                 synchronized (unmarshaller) {
                     obj = unmarshaller.unmarshal(inputStream);
                 }
+                LOGGER.log(Level.INFO, "Unmarshalled object in {0} ms", (System.nanoTime() - stepTime) / 1_000_000);
             } catch (ObjectNotInLowlevelStorageException ex) {
                 return null;
             } catch (Exception e) {
                 throw new IOException(e);
             } finally {
-                LOGGER.log(Level.INFO, "Read object from storage in {0} ms", (System.nanoTime() - stepTime) / 1_000_000);
                 stepTime = System.nanoTime();
                 lock.unlock();
                 LOGGER.log(Level.INFO, "Free read lock in {0} ms", (System.nanoTime() - stepTime) / 1_000_000);
