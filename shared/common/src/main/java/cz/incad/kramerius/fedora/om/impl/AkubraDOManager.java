@@ -65,17 +65,17 @@ public class AkubraDOManager {
     private static Unmarshaller unmarshaller = null;
     private static Marshaller marshaller = null;
 
-    private static final BlockingQueue<Unmarshaller> unmarshallerPool = new LinkedBlockingQueue<>();
+    private static final BlockingQueue<Unmarshaller> unmarshallerPool = new LinkedBlockingQueue<>(50);
 
     static {
         try {
             JAXBContext jaxbContext = JAXBContext.newInstance(DigitalObject.class);
 
-            // for (int i = 0; i < 50; i++) {
-            //     unmarshallerPool.offer(jaxbContext.createUnmarshaller());
-            // }
+            for (int i = 0; i < 50; i++) {
+                unmarshallerPool.offer(jaxbContext.createUnmarshaller());
+            }
 
-            unmarshaller = jaxbContext.createUnmarshaller();
+            // unmarshaller = jaxbContext.createUnmarshaller();
 
 
             //JAXBContext jaxbdatastreamContext = JAXBContext.newInstance(DatastreamType.class);
@@ -218,18 +218,24 @@ public class AkubraDOManager {
             LOGGER.log(Level.INFO, "{0},AcquiredLock,{1}", new Object[]{pid, (System.nanoTime() - stepTime) / 1_000_000});
             stepTime = System.nanoTime();
             try (InputStream inputStream = this.storage.retrieveObject(pid);){
+                // LOGGER.log(Level.INFO, "{0},RetrievedObject,{1}", new Object[]{pid, (System.nanoTime() - stepTime) / 1_000_000});
+                // stepTime = System.nanoTime();
+                // synchronized (unmarshaller) {
+                //     LOGGER.log(Level.INFO, "{0},RetrievedUnmarshaller,{1}", new Object[]{pid, (System.nanoTime() - stepTime) / 1_000_000});
+                //     stepTime = System.nanoTime();
+                //     obj = unmarshaller.unmarshal(inputStream);
+                //     LOGGER.log(Level.INFO, "{0},Unmarshalled,{1}", new Object[]{pid, (System.nanoTime() - stepTime) / 1_000_000});
+                //     stepTime = System.nanoTime();
+                // }
                 LOGGER.log(Level.INFO, "{0},RetrievedObject,{1}", new Object[]{pid, (System.nanoTime() - stepTime) / 1_000_000});
                 stepTime = System.nanoTime();
-                synchronized (unmarshaller) {
-                    LOGGER.log(Level.INFO, "{0},RetrievedUnmarshaller,{1}", new Object[]{pid, (System.nanoTime() - stepTime) / 1_000_000});
-                    stepTime = System.nanoTime();
-                    obj = unmarshaller.unmarshal(inputStream);
-                    LOGGER.log(Level.INFO, "{0},Unmarshalled,{1}", new Object[]{pid, (System.nanoTime() - stepTime) / 1_000_000});
-                    stepTime = System.nanoTime();
-                }
-                // Unmarshaller unmarshaller = unmarshallerPool.take();
-                // obj = unmarshaller.unmarshal(inputStream);
-                // unmarshallerPool.offer(unmarshaller);
+                Unmarshaller unmarshaller = unmarshallerPool.take();
+                LOGGER.log(Level.INFO, "{0},RetrievedUnmarshaller,{1}", new Object[]{pid, (System.nanoTime() - stepTime) / 1_000_000});
+                stepTime = System.nanoTime();
+                obj = unmarshaller.unmarshal(inputStream);
+                unmarshallerPool.offer(unmarshaller);
+                LOGGER.log(Level.INFO, "{0},Unmarshalled,{1}", new Object[]{pid, (System.nanoTime() - stepTime) / 1_000_000});
+                stepTime = System.nanoTime();
             } catch (ObjectNotInLowlevelStorageException ex) {
                 return null;
             } catch (Exception e) {
