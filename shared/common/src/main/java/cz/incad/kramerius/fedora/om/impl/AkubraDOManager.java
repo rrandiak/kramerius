@@ -66,7 +66,7 @@ public class AkubraDOManager {
     private static final ThreadLocal<Unmarshaller> threadLocalUnmarshaller = ThreadLocal.withInitial(() -> {
         try {
             return JAXBContext.newInstance(DigitalObject.class).createUnmarshaller();
-        } catch (JAXBException e) {
+        } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Cannot init JAXB", e);
             throw new RuntimeException(e);
         }
