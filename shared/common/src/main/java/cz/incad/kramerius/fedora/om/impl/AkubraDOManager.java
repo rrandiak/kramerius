@@ -71,11 +71,11 @@ public class AkubraDOManager {
         try {
             JAXBContext jaxbContext = JAXBContext.newInstance(DigitalObject.class);
 
-            for (int i = 0; i < 50; i++) {
-                unmarshallerPool.offer(jaxbContext.createUnmarshaller());
-            }
+            // for (int i = 0; i < 50; i++) {
+            //     unmarshallerPool.offer(jaxbContext.createUnmarshaller());
+            // }
 
-            // unmarshaller = jaxbContext.createUnmarshaller();
+            unmarshaller = jaxbContext.createUnmarshaller();
 
 
             //JAXBContext jaxbdatastreamContext = JAXBContext.newInstance(DatastreamType.class);
