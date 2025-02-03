@@ -218,7 +218,7 @@ public class AkubraDOManager {
                 //     obj = unmarshaller.unmarshal(inputStream);
                 // }
                 Unmarshaller unmarshaller = threadLocalUnmarshaller.get();
-                retval = (DigitalObject) unmarshaller.unmarshal(inputStream);
+                obj = unmarshaller.unmarshal(inputStream);
             } catch (ObjectNotInLowlevelStorageException ex) {
                 return null;
             } catch (Exception e) {
