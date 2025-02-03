@@ -208,17 +208,28 @@ public class AkubraDOManager {
     }
 
     private DigitalObject readObjectFromStorageOrCache(String pid, boolean useCache) throws IOException {
+        long startTime = System.nanoTime();
+        long stepTime = 0;
         DigitalObject retval = useCache ? objectCache.get(pid) : null;
         if (retval == null) {
             Object obj = null;
+            stepTime = System.nanoTime();
             Lock lock = getReadLock(pid);
+            LOGGER.log(Level.INFO, "{0},AcquiredLock,{1}", new Object[]{pid, (System.nanoTime() - stepTime) / 1_000_000});
+            stepTime = System.nanoTime();
             try (InputStream inputStream = this.storage.retrieveObject(pid);){
-                // synchronized (unmarshaller) {
-                //     obj = unmarshaller.unmarshal(inputStream);
-                // }
-                Unmarshaller unmarshaller = unmarshallerPool.take();
-                obj = unmarshaller.unmarshal(inputStream);
-                unmarshallerPool.offer(unmarshaller);
+                LOGGER.log(Level.INFO, "{0},RetrievedObject,{1}", new Object[]{pid, (System.nanoTime() - stepTime) / 1_000_000});
+                stepTime = System.nanoTime();
+                synchronized (unmarshaller) {
+                    LOGGER.log(Level.INFO, "{0},RetrievedUnmarshaller,{1}", new Object[]{pid, (System.nanoTime() - stepTime) / 1_000_000});
+                    stepTime = System.nanoTime();
+                    obj = unmarshaller.unmarshal(inputStream);
+                    LOGGER.log(Level.INFO, "{0},Unmarshalled,{1}", new Object[]{pid, (System.nanoTime() - stepTime) / 1_000_000});
+                    stepTime = System.nanoTime();
+                }
+                // Unmarshaller unmarshaller = unmarshallerPool.take();
+                // obj = unmarshaller.unmarshal(inputStream);
+                // unmarshallerPool.offer(unmarshaller);
             } catch (ObjectNotInLowlevelStorageException ex) {
                 return null;
             } catch (Exception e) {
@@ -226,11 +237,14 @@ public class AkubraDOManager {
             } finally {
                 lock.unlock();
             }
+            LOGGER.log(Level.INFO, "{0},ReleasedLock,{1}", new Object[]{pid, (System.nanoTime() - stepTime) / 1_000_000});
             retval = (DigitalObject) obj;
             if (useCache) {
                 objectCache.put(pid, retval);
             }
         }
+        stepTime = System.nanoTime();
+        LOGGER.log(Level.INFO, "{0},Finished,{1}", new Object[]{pid, (System.nanoTime() - startTime) / 1_000_000});
         return retval;
     }
 
