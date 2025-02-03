@@ -63,6 +63,15 @@ public class AkubraDOManager {
     private static Unmarshaller unmarshaller = null;
     private static Marshaller marshaller = null;
 
+    private static final ThreadLocal<Unmarshaller> threadLocalUnmarshaller = ThreadLocal.withInitial(() -> {
+        try {
+            return JAXBContext.newInstance(DigitalObject.class).createUnmarshaller();
+        } catch (JAXBException e) {
+            LOGGER.log(Level.SEVERE, "Cannot init JAXB", e);
+            throw new RuntimeException(e);
+        }
+    });
+
     static {
         try {
             JAXBContext jaxbContext = JAXBContext.newInstance(DigitalObject.class);
@@ -205,9 +214,11 @@ public class AkubraDOManager {
             Object obj = null;
             Lock lock = getReadLock(pid);
             try (InputStream inputStream = this.storage.retrieveObject(pid);){
-                synchronized (unmarshaller) {
-                    obj = unmarshaller.unmarshal(inputStream);
-                }
+                // synchronized (unmarshaller) {
+                //     obj = unmarshaller.unmarshal(inputStream);
+                // }
+                Unmarshaller unmarshaller = threadLocalUnmarshaller.get();
+                retval = (DigitalObject) unmarshaller.unmarshal(inputStream);
             } catch (ObjectNotInLowlevelStorageException ex) {
                 return null;
             } catch (Exception e) {
