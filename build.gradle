@@ -164,7 +164,8 @@ allprojects {
         }
 
         maven {
-            url "https://repository.springsource.com/maven/bundles/external"
+            // url "https://repository.springsource.com/maven/bundles/external"
+            url "https://nexus.geomatys.com/repository/geotoolkit/"
         }
 
         maven {
