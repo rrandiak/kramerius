@@ -43,6 +43,8 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -63,20 +65,17 @@ public class AkubraDOManager {
     private static Unmarshaller unmarshaller = null;
     private static Marshaller marshaller = null;
 
-    private static final ThreadLocal<Unmarshaller> threadLocalUnmarshaller = ThreadLocal.withInitial(() -> {
-        try {
-            return JAXBContext.newInstance(DigitalObject.class).createUnmarshaller();
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Cannot init JAXB", e);
-            throw new RuntimeException(e);
-        }
-    });
+    private static final BlockingQueue<Unmarshaller> unmarshallerPool = new LinkedBlockingQueue<>();
 
     static {
         try {
             JAXBContext jaxbContext = JAXBContext.newInstance(DigitalObject.class);
 
-            unmarshaller = jaxbContext.createUnmarshaller();
+            for (int i = 0; i < 50; i++) {
+                unmarshallerPool.offer(jaxbContext.createUnmarshaller());
+            }
+
+            // unmarshaller = jaxbContext.createUnmarshaller();
 
 
             //JAXBContext jaxbdatastreamContext = JAXBContext.newInstance(DatastreamType.class);
@@ -217,8 +216,9 @@ public class AkubraDOManager {
                 // synchronized (unmarshaller) {
                 //     obj = unmarshaller.unmarshal(inputStream);
                 // }
-                Unmarshaller unmarshaller = threadLocalUnmarshaller.get();
+                Unmarshaller unmarshaller = unmarshallerPool.take();
                 obj = unmarshaller.unmarshal(inputStream);
+                unmarshallerPool.offer(unmarshaller);
             } catch (ObjectNotInLowlevelStorageException ex) {
                 return null;
             } catch (Exception e) {
