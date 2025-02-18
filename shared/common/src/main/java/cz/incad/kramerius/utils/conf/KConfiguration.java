@@ -32,16 +32,21 @@ public class KConfiguration {
         workingDir = newWorkingDir;
     }
 
-    public synchronized static KConfiguration getInstance() {
-        if (_sharedInstance == null) {
-            if (workingDir == null){
-                workingDir = WORKING_DIR;
-            }
-            _sharedInstance = new KConfiguration(workingDir);
+    public static KConfiguration getInstance() {
+        if (_sharedInstance == null || workingDir == null) {
+            setUpInstance();
         }
         return _sharedInstance;
     }
 
+    public static synchronized void setUpInstance() {
+        if (_sharedInstance == null) {
+            if (workingDir == null) {
+                workingDir = WORKING_DIR;
+            }
+            _sharedInstance = new KConfiguration(workingDir);
+        }
+    }
 
     private Configuration allConfigurations;
     private String configDir = null;
@@ -102,6 +107,7 @@ public class KConfiguration {
                 }
             }
 
+            /** ENV configuration is not used
             EnvironmentConfiguration environmentConfiguration = new EnvironmentConfiguration();
             for (Iterator it = environmentConfiguration.getKeys(); it.hasNext(); ) {
                 String key = (String) it.next();
@@ -109,7 +115,7 @@ public class KConfiguration {
                 key = key.replaceAll("_", ".");
                 key = key.replaceAll("\\.\\.", "__");
                 allConfiguration.setProperty(key, value);
-            }
+            }*/
 
             return allConfiguration;
         } catch (ConfigurationException e) {
@@ -156,6 +162,14 @@ public class KConfiguration {
         return getProperty("solrProcessingHost");
     }
 
+    public String getSolrUpdatesHost() {
+        return getProperty("solrUpdatesHost");
+    }
+
+    public String getSolrReharvestHost() {
+        return getProperty("solrReharvestHost");
+    }
+
     public String getSolrSearchHost() {
         return getProperty("solrSearchHost");
     }
@@ -198,6 +212,10 @@ public class KConfiguration {
 
     public String getJdbcUserPass() {
         return getProperty("jdbcUserPass");
+    }
+
+    public int getUnmarshallerPoolSize() {
+        return getConfiguration().getInt("unmarshallerPoolSize", 16);
     }
 
     public String getProperty(String key) {
