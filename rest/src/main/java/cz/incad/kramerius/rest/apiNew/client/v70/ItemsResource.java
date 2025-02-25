@@ -215,14 +215,8 @@ public class ItemsResource extends ClientApiResource {
     @Inject
     protected transient HttpAsyncClient client;
 
-    
-    private Client c;
-
     public ItemsResource() {
         super();
-        this.c = Client.create();
-        this.c.setConnectTimeout(5000);
-        this.c.setReadTimeout(10000);
     }
 
     
