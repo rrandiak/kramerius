@@ -198,7 +198,8 @@ public class SolrIndexAccess {
     }
 
     public UpdateResponse commit() throws IOException, SolrServerException {
-        return solrClient.commit(collection);
+        boolean hardCommit = KConfiguration.getInstance().getConfiguration().getBoolean("solr." + collection + ".hard_commit", true);
+        return solrClient.commit(collection, true, true, hardCommit);
     }
 
     public void setSingleFieldValue(String pid, RepositoryNode repositoryNode, String fieldName, Object value, boolean indexTime, boolean explicitCommit) {
