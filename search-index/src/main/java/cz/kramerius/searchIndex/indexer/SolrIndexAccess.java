@@ -22,7 +22,6 @@ import org.dom4j.DocumentException;
 import org.dom4j.Element;
 import org.dom4j.Node;
 import org.dom4j.io.SAXReader;
-import org.jboss.resteasy.client.jaxrs.i18n.LogMessages_.logger;
 
 import java.io.*;
 import java.time.ZonedDateTime;
