@@ -198,8 +198,10 @@ public class SolrIndexAccess {
     }
 
     public UpdateResponse commit() throws IOException, SolrServerException {
-        boolean hardCommit = KConfiguration.getInstance().getConfiguration().getBoolean("solr." + collection + ".hard_commit", true);
-        return solrClient.commit(collection, true, true, hardCommit);
+        boolean waitFlush = KConfiguration.getInstance().getConfiguration().getBoolean("solr." + collection + ".waitFlush", true);
+        boolean waitSearcher = KConfiguration.getInstance().getConfiguration().getBoolean("solr." + collection + ".waitSearcher", true);
+        boolean softCommit = KConfiguration.getInstance().getConfiguration().getBoolean("solr." + collection + ".softCommit", false);
+        return solrClient.commit(collection, waitFlush, waitSearcher, softCommit);
     }
 
     public void setSingleFieldValue(String pid, RepositoryNode repositoryNode, String fieldName, Object value, boolean indexTime, boolean explicitCommit) {
