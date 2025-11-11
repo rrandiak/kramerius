@@ -201,9 +201,10 @@ public class SolrIndexAccess {
     }
 
     public UpdateResponse commit() throws IOException, SolrServerException {
-        boolean waitFlush = KConfiguration.getInstance().getConfiguration().getBoolean("solr." + collection + ".waitFlush", true);
-        boolean waitSearcher = KConfiguration.getInstance().getConfiguration().getBoolean("solr." + collection + ".waitSearcher", true);
-        boolean softCommit = KConfiguration.getInstance().getConfiguration().getBoolean("solr." + collection + ".softCommit", false);
+        String collectionName = collection.replaceAll("^/+", "");
+        boolean waitFlush = KConfiguration.getInstance().getConfiguration().getBoolean("solr." + collectionName + ".waitFlush", true);
+        boolean waitSearcher = KConfiguration.getInstance().getConfiguration().getBoolean("solr." + collectionName + ".waitSearcher", true);
+        boolean softCommit = KConfiguration.getInstance().getConfiguration().getBoolean("solr." + collectionName + ".softCommit", false);
         LOGGER.log(Level.INFO, "Committing to Solr collection {0} with waitFlush={1}, waitSearcher={2}, softCommit={3}", new Object[]{collection, waitFlush, waitSearcher, softCommit});
         return solrClient.commit(collection, waitFlush, waitSearcher, softCommit);
     }
