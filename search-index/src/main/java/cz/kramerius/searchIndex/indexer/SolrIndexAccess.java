@@ -22,6 +22,7 @@ import org.dom4j.DocumentException;
 import org.dom4j.Element;
 import org.dom4j.Node;
 import org.dom4j.io.SAXReader;
+import org.jboss.resteasy.client.jaxrs.i18n.LogMessages_.logger;
 
 import java.io.*;
 import java.time.ZonedDateTime;
@@ -31,10 +32,13 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import static cz.kramerius.searchIndex.indexer.execution.Indexer.*;
 
 public class SolrIndexAccess {
+    private static final Logger LOGGER = Logger.getLogger(SolrIndexAccess.class.getName());
 
     public static final int MAX_TIME_WITHOUT_COMMIT_MS = 15000; //15 seconds
     public static final int CONNECTION_TIMEOUT = 10000;
@@ -201,6 +205,7 @@ public class SolrIndexAccess {
         boolean waitFlush = KConfiguration.getInstance().getConfiguration().getBoolean("solr." + collection + ".waitFlush", true);
         boolean waitSearcher = KConfiguration.getInstance().getConfiguration().getBoolean("solr." + collection + ".waitSearcher", true);
         boolean softCommit = KConfiguration.getInstance().getConfiguration().getBoolean("solr." + collection + ".softCommit", false);
+        LOGGER.log(Level.INFO, "Committing to Solr collection {0} with waitFlush={1}, waitSearcher={2}, softCommit={3}", new Object[]{collection, waitFlush, waitSearcher, softCommit});
         return solrClient.commit(collection, waitFlush, waitSearcher, softCommit);
     }
 
