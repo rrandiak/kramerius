@@ -54,7 +54,7 @@ public class ProcessingIndexRebuild {
 
     public static final Logger LOGGER = Logger.getLogger(ProcessingIndexCheck.class.getName());
 
-    private static final int UNMARSHALLER_POOL_CAPACITY = 20;
+    private static final int UNMARSHALLER_POOL_CAPACITY = 50;
     private static final BlockingQueue<Unmarshaller> unmarshallerPool = new LinkedBlockingQueue<>(UNMARSHALLER_POOL_CAPACITY);
 
     private volatile static long counter = 0;
@@ -86,7 +86,9 @@ public class ProcessingIndexRebuild {
         // ForkJoinPool is used to preserve parallelization.
         // The default constructor of ForkJoinPool creates a pool with parallelism
         // equal to Runtime.availableProcessors(), same as parallel streams.
-        try (ForkJoinPool forkJoinPool = new ForkJoinPool()) {
+        int parallelism = Math.min(64, Runtime.getRuntime().availableProcessors() * 4);
+
+        try (ForkJoinPool forkJoinPool = new ForkJoinPool(parallelism)) {
             // Files.walkFileTree() is used because it does not store any Paths in memory,
             // which makes it a more efficient solution to the problem compared to Files.walk().
             Files.walkFileTree(objectStoreRoot,
@@ -147,17 +149,6 @@ public class ProcessingIndexRebuild {
                     return FileVisitResult.CONTINUE;
                 }
             });
-
-//        Files.walk(objectStoreRoot, FileVisitOption.FOLLOW_LINKS).parallel().filter(Files::isRegularFile).forEach(path -> {
-//            String filename = path.toString();
-//            try {
-//                FileInputStream inputStream = new FileInputStream(path.toFile());
-//                DigitalObject digitalObject = createDigitalObject(inputStream);
-//                rebuildProcessingIndex(feeder, digitalObject);
-//            } catch (Exception ex) {
-//                LOGGER.log(Level.SEVERE, "Error processing file: " + filename, ex);
-//            }
-//        });
 
             // Wait for all tasks to finish
             forkJoinPool.shutdown();
