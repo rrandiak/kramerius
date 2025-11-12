@@ -40,6 +40,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 
 /**
  * Deklarace procesu je v shared/common/src/main/java/cz/incad/kramerius/processes/res/lp.st (processing_rebuild)
@@ -52,12 +54,15 @@ public class ProcessingIndexRebuild {
 
     public static final Logger LOGGER = Logger.getLogger(ProcessingIndexCheck.class.getName());
 
-    private static final Unmarshaller unmarshaller = initUnmarshaller();
+    private static final int UNMARSHALLER_POOL_CAPACITY = 20;
+    private static final BlockingQueue<Unmarshaller> unmarshallerPool = new LinkedBlockingQueue<>(UNMARSHALLER_POOL_CAPACITY);
 
     private volatile static long counter = 0;
 
 
     public static void main(String[] args) throws IOException, SolrServerException {
+        initialize();
+
         if (args.length>=1 && "REBUILDPROCESSING".equalsIgnoreCase(args[0])){
             LOGGER.info("Přebudování Processing indexu");
         } else {
@@ -81,27 +86,35 @@ public class ProcessingIndexRebuild {
         // ForkJoinPool is used to preserve parallelization.
         // The default constructor of ForkJoinPool creates a pool with parallelism
         // equal to Runtime.availableProcessors(), same as parallel streams.
-        ForkJoinPool forkJoinPool = new ForkJoinPool();
-
-        // Files.walkFileTree() is used because it does not store any Paths in memory,
-        // which makes it a more efficient solution to the problem compared to Files.walk().
-        Files.walkFileTree(objectStoreRoot,
-                Collections.singleton(FileVisitOption.FOLLOW_LINKS),
-                Integer.MAX_VALUE,
-                new FileVisitor<Path>() {
-            @Override
-            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-                return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                if (!Files.isRegularFile(file)) {
+        try (ForkJoinPool forkJoinPool = new ForkJoinPool()) {
+            // Files.walkFileTree() is used because it does not store any Paths in memory,
+            // which makes it a more efficient solution to the problem compared to Files.walk().
+            Files.walkFileTree(objectStoreRoot,
+                    Collections.singleton(FileVisitOption.FOLLOW_LINKS),
+                    Integer.MAX_VALUE,
+                    new FileVisitor<Path>() {
+                @Override
+                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
                     return FileVisitResult.CONTINUE;
                 }
 
-                if (forkJoinPool.getQueuedSubmissionCount() < MAX_QUEUED_SUBMITTED_TASKS) {
-                    forkJoinPool.execute(() -> {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    if (!Files.isRegularFile(file)) {
+                        return FileVisitResult.CONTINUE;
+                    }
+
+                    if (forkJoinPool.getQueuedSubmissionCount() < MAX_QUEUED_SUBMITTED_TASKS) {
+                        forkJoinPool.execute(() -> {
+                            String filename = file.toString();
+                            try (FileInputStream inputStream = new FileInputStream(file.toFile())) {
+                                DigitalObject digitalObject = createDigitalObject(inputStream);
+                                rebuildProcessingIndex(akubraRepository, digitalObject, null);
+                            } catch (Exception ex) {
+                                LOGGER.log(Level.SEVERE, "Error processing file: " + filename, ex);
+                            }
+                        });
+                    } else {
                         String filename = file.toString();
                         try (FileInputStream inputStream = new FileInputStream(file.toFile())) {
                             DigitalObject digitalObject = createDigitalObject(inputStream);
@@ -109,41 +122,32 @@ public class ProcessingIndexRebuild {
                         } catch (Exception ex) {
                             LOGGER.log(Level.SEVERE, "Error processing file: " + filename, ex);
                         }
-                    });
-                } else {
-                    String filename = file.toString();
-                    try (FileInputStream inputStream = new FileInputStream(file.toFile())) {
-                        DigitalObject digitalObject = createDigitalObject(inputStream);
-                        rebuildProcessingIndex(akubraRepository, digitalObject, null);
-                    } catch (Exception ex) {
-                        LOGGER.log(Level.SEVERE, "Error processing file: " + filename, ex);
                     }
+
+                    return FileVisitResult.CONTINUE;
+                }
+                
+
+                @Override
+                public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException {
+                    LOGGER.log(Level.SEVERE, "Error processing file: " + file.toString(), exc);
+
+                    // This will allow the execution to continue uninterrupted,
+                    // even in the event of encountering permission errors.
+                    return FileVisitResult.CONTINUE;
                 }
 
-                return FileVisitResult.CONTINUE;
-            }
-            
+                @Override
+                public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                    if (exc != null) {
+                        LOGGER.log(Level.SEVERE, "Error searching directory : " + dir.toString(), exc);
+                    }
 
-            @Override
-            public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException {
-                LOGGER.log(Level.SEVERE, "Error processing file: " + file.toString(), exc);
-
-                // This will allow the execution to continue uninterrupted,
-                // even in the event of encountering permission errors.
-                return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
-                if (exc != null) {
-                    LOGGER.log(Level.SEVERE, "Error searching directory : " + dir.toString(), exc);
+                    // This will allow the execution to continue uninterrupted,
+                    // even in the event of encountering permission errors.
+                    return FileVisitResult.CONTINUE;
                 }
-
-                // This will allow the execution to continue uninterrupted,
-                // even in the event of encountering permission errors.
-                return FileVisitResult.CONTINUE;
-            }
-        });
+            });
 
 //        Files.walk(objectStoreRoot, FileVisitOption.FOLLOW_LINKS).parallel().filter(Files::isRegularFile).forEach(path -> {
 //            String filename = path.toString();
@@ -156,15 +160,16 @@ public class ProcessingIndexRebuild {
 //            }
 //        });
 
-        // Wait for all tasks to finish
-        forkJoinPool.shutdown();
-        try {
-            if (!forkJoinPool.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS)) {
-                LOGGER.severe("ForkJoinPool did not terminate.");
+            // Wait for all tasks to finish
+            forkJoinPool.shutdown();
+            try {
+                if (!forkJoinPool.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS)) {
+                    LOGGER.severe("ForkJoinPool did not terminate.");
+                }
+            } catch (InterruptedException e) {
+                LOGGER.log(Level.SEVERE, "Interrupted while waiting for ForkJoinPool to terminate", e);
+                Thread.currentThread().interrupt();
             }
-        } catch (InterruptedException e) {
-            LOGGER.log(Level.SEVERE, "Interrupted while waiting for ForkJoinPool to terminate", e);
-            Thread.currentThread().interrupt();
         }
 
         LOGGER.info("Finished tree walk in " + (System.currentTimeMillis() - start) + " ms");
@@ -176,9 +181,9 @@ public class ProcessingIndexRebuild {
     private static DigitalObject createDigitalObject(InputStream inputStream) {
         DigitalObject obj = null;
         try {
-            synchronized (unmarshaller) {
-                obj = (DigitalObject) unmarshaller.unmarshal(inputStream);
-            }
+            Unmarshaller unmarshaller = unmarshallerPool.take();
+            obj = (DigitalObject) unmarshaller.unmarshal(inputStream);
+            unmarshallerPool.offer(unmarshaller);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -194,13 +199,15 @@ public class ProcessingIndexRebuild {
         akubraRepository.pi().rebuildProcessingIndex(pid, var2);
     }
 
-    private static Unmarshaller initUnmarshaller() {
+    private static void initialize() {
         try {
             JAXBContext jaxbContext = JAXBContext.newInstance(DigitalObject.class);
-            return jaxbContext.createUnmarshaller();
+            for (int i = 0; i < UNMARSHALLER_POOL_CAPACITY; i++) {
+                unmarshallerPool.offer(jaxbContext.createUnmarshaller());
+            }
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Cannot init JAXB", e);
-            throw new RuntimeException(e);
+            throw new RepositoryException(e);
         }
     }
 }
