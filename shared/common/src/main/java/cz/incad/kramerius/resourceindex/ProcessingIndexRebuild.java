@@ -38,6 +38,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -55,7 +56,9 @@ public class ProcessingIndexRebuild {
     private static final int BATCH_SIZE = 10000;
     private static final int PRODUCER_THREADS = 1;
     private static final int CONSUMER_THREADS = Math.min(32, Runtime.getRuntime().availableProcessors() * 2);
-    private static final BlockingQueue<Path> FILE_QUEUE = new LinkedBlockingQueue<>(BATCH_SIZE * (CONSUMER_THREADS / 2));
+    
+    private static final BlockingQueue<Path> fileQueue = new LinkedBlockingQueue<>(BATCH_SIZE * (CONSUMER_THREADS / 2));
+    private static final AtomicLong filesEnqueued = new AtomicLong(0);
     private static volatile boolean doneProducing = false;
 
     // Thread-local unmarshaller for safe concurrent usage
@@ -106,7 +109,11 @@ public class ProcessingIndexRebuild {
                             }
 
                             try {
-                                FILE_QUEUE.put(file);
+                                fileQueue.put(file);
+                                long count = filesEnqueued.incrementAndGet();
+                                if (count % 10000 == 0) {
+                                    LOGGER.info("Enqueued " + count + " files for processing so far...");
+                                }
                             } catch (InterruptedException e) {
                                 Thread.currentThread().interrupt();
                                 throw new IOException("Producer thread interrupted", e);
@@ -149,9 +156,9 @@ public class ProcessingIndexRebuild {
             consumers.submit(() -> {
                 List<String> batch = new ArrayList<>(BATCH_SIZE);
                 Path file;
-                while (!doneProducing || !FILE_QUEUE.isEmpty()) {
+                while (!doneProducing || !fileQueue.isEmpty()) {
                     try {
-                        file = FILE_QUEUE.poll(1, TimeUnit.SECONDS);
+                        file = fileQueue.poll(1, TimeUnit.SECONDS);
                         if (file == null) {
                             continue;
                         }
