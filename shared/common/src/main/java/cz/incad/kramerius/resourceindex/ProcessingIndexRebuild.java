@@ -55,9 +55,9 @@ public class ProcessingIndexRebuild {
 
     private static final int BATCH_SIZE = 10000;
     private static final int PRODUCER_THREADS = 1;
-    private static final int CONSUMER_THREADS = Math.min(32, Runtime.getRuntime().availableProcessors() * 2);
-    
-    private static final BlockingQueue<Path> fileQueue = new LinkedBlockingQueue<>(BATCH_SIZE * (CONSUMER_THREADS / 2));
+    private static final int CONSUMER_THREADS = Runtime.getRuntime().availableProcessors() * 8;
+
+    private static final BlockingQueue<Path> fileQueue = new LinkedBlockingQueue<>(BATCH_SIZE * 2);
     private static volatile boolean doneProducing = false;
     private static final AtomicLong pidsProcessed = new AtomicLong(0);
 
@@ -79,10 +79,10 @@ public class ProcessingIndexRebuild {
         
         LOGGER.info(
             "Starting rebuild processing process with:"
-            + "\n\tObject store root path: " + objectStoreRoot.toString()
-            + "\n\tNumber of producer (file visitor) threads: " + PRODUCER_THREADS
-            + "\n\tNumber of consumer (unmarshalling and indexing) threads: " + CONSUMER_THREADS
-            + "\n\tIndex batch size: " + BATCH_SIZE
+            + "\n    Object store root path: " + objectStoreRoot.toString()
+            + "\n    Number of producer (file visitor) threads: " + PRODUCER_THREADS
+            + "\n    Number of consumer (unmarshalling and indexing) threads: " + CONSUMER_THREADS
+            + "\n    Index batch size: " + BATCH_SIZE
         );
         
         // Producer: walk file tree and submit tasks
