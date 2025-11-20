@@ -33,6 +33,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ForkJoinPool;
@@ -41,28 +42,33 @@ import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 
 /**
  * Deklarace procesu je v shared/common/src/main/java/cz/incad/kramerius/processes/res/lp.st (processing_rebuild)
  */
 public class ProcessingIndexRebuild {
-    // Could be any number between 100 and 500,000. Lower the number, lower memory usage.
-    // If it was too low, parallelization would be less effective.
-    // If it was too large, memory usage would slower overall execution, due to memory management.
-    private static final int MAX_QUEUED_SUBMITTED_TASKS = 10000;
-
     public static final Logger LOGGER = Logger.getLogger(ProcessingIndexCheck.class.getName());
 
-    private static final int UNMARSHALLER_POOL_CAPACITY = 50;
-    private static final BlockingQueue<Unmarshaller> unmarshallerPool = new LinkedBlockingQueue<>(UNMARSHALLER_POOL_CAPACITY);
+    private static final int BATCH_SIZE = 10000;
+    private static final int PRODUCER_THREADS = 1;
+    private static final int CONSUMER_THREADS = Math.min(32, Runtime.getRuntime().availableProcessors() * 2);
+    private static final BlockingQueue<Path> FILE_QUEUE = new LinkedBlockingQueue<>(BATCH_SIZE * 2);
+    private static volatile boolean doneProducing = false;
 
-    private volatile static long counter = 0;
-
+    // Thread-local unmarshaller for safe concurrent usage
+    private static final ThreadLocal<Unmarshaller> LOCAL_UNMARSHALLER = ThreadLocal.withInitial(() -> {
+        try {
+            JAXBContext context = JAXBContext.newInstance(DigitalObject.class);
+            return context.createUnmarshaller();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to init unmarshaller", e);
+        }
+    });
 
     public static void main(String[] args) throws IOException, SolrServerException {
-        initialize();
-
         if (args.length>=1 && "REBUILDPROCESSING".equalsIgnoreCase(args[0])){
             LOGGER.info("Přebudování Processing indexu");
         } else {
@@ -73,93 +79,134 @@ public class ProcessingIndexRebuild {
 
         long start = System.currentTimeMillis();
         akubraRepository.pi().deleteProcessingIndex();
-        Path objectStoreRoot = null;
-        if (KConfiguration.getInstance().getConfiguration().getBoolean("legacyfs")) {
-            objectStoreRoot = Paths.get(KConfiguration.getInstance().getProperty("object_store_base"));
-        } else {
-            objectStoreRoot = Paths.get(KConfiguration.getInstance().getProperty("objectStore.path"));
-        }
+        Path objectStoreRoot = 
+            KConfiguration.getInstance().getConfiguration().getBoolean("legacyfs")
+            ? Paths.get(KConfiguration.getInstance().getProperty("object_store_base"))
+            : Paths.get(KConfiguration.getInstance().getProperty("objectStore.path"));
         
-        //boolean exclusiveCommit = KConfiguration.getInstance().getConfiguration().getBoolean("processingIndex.commit", false);
-        
-
-        // ForkJoinPool is used to preserve parallelization.
-        // The default constructor of ForkJoinPool creates a pool with parallelism
-        // equal to Runtime.availableProcessors(), same as parallel streams.
-        int parallelism = Math.min(64, Runtime.getRuntime().availableProcessors() * 4);
-
-        try (ForkJoinPool forkJoinPool = new ForkJoinPool(parallelism)) {
-            // Files.walkFileTree() is used because it does not store any Paths in memory,
-            // which makes it a more efficient solution to the problem compared to Files.walk().
-            Files.walkFileTree(objectStoreRoot,
+        // Producer: walk file tree and submit tasks
+        ExecutorService producer = Executors.newFixedThreadPool(PRODUCER_THREADS);
+        // Files.walkFileTree() is used because it does not store any Paths in memory,
+        // which makes it a more efficient solution to the problem compared to Files.walk().
+        producer.submit(() -> {
+            try {
+                Files.walkFileTree(objectStoreRoot,
                     Collections.singleton(FileVisitOption.FOLLOW_LINKS),
                     Integer.MAX_VALUE,
                     new FileVisitor<Path>() {
-                @Override
-                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-                    return FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                    if (!Files.isRegularFile(file)) {
-                        return FileVisitResult.CONTINUE;
-                    }
-
-                    if (forkJoinPool.getQueuedSubmissionCount() < MAX_QUEUED_SUBMITTED_TASKS) {
-                        forkJoinPool.execute(() -> {
-                            String filename = file.toString();
-                            try (FileInputStream inputStream = new FileInputStream(file.toFile())) {
-                                DigitalObject digitalObject = createDigitalObject(inputStream);
-                                rebuildProcessingIndex(akubraRepository, digitalObject, null);
-                            } catch (Exception ex) {
-                                LOGGER.log(Level.SEVERE, "Error processing file: " + filename, ex);
-                            }
-                        });
-                    } else {
-                        String filename = file.toString();
-                        try (FileInputStream inputStream = new FileInputStream(file.toFile())) {
-                            DigitalObject digitalObject = createDigitalObject(inputStream);
-                            rebuildProcessingIndex(akubraRepository, digitalObject, null);
-                        } catch (Exception ex) {
-                            LOGGER.log(Level.SEVERE, "Error processing file: " + filename, ex);
+                        @Override
+                        public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                            return FileVisitResult.CONTINUE;
                         }
+
+                        @Override
+                        public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                            if (!Files.isRegularFile(file)) {
+                                return FileVisitResult.CONTINUE;
+                            }
+
+                            try {
+                                FILE_QUEUE.put(file);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                throw new IOException("Producer thread interrupted", e);
+                            }
+
+                            return FileVisitResult.CONTINUE;
+                        }
+
+                        @Override
+                        public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException {
+                            LOGGER.log(Level.SEVERE, "Error processing file: " + file.toString(), exc);
+
+                            // This will allow the execution to continue uninterrupted,
+                            // even in the event of encountering permission errors.
+                            return FileVisitResult.CONTINUE;
+                        }
+
+                        @Override
+                        public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                            if (exc != null) {
+                                LOGGER.log(Level.SEVERE, "Error searching directory : " + dir.toString(), exc);
+                            }
+
+                            // This will allow the execution to continue uninterrupted,
+                            // even in the event of encountering permission errors.
+                            return FileVisitResult.CONTINUE;
+                        }
+                    });
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            } finally {
+                doneProducing = true;
+                LOGGER.info("Done producing PIDs");
+            }
+        });
+
+        // Consumers: batch processing
+        ExecutorService consumers = Executors.newFixedThreadPool(CONSUMER_THREADS);
+        for (int i = 0; i < CONSUMER_THREADS; i++) {
+            consumers.submit(() -> {
+                List<String> batch = new ArrayList<>(BATCH_SIZE);
+                Path file;
+                while (!doneProducing || !FILE_QUEUE.isEmpty()) {
+                    try {
+                        file = FILE_QUEUE.poll(1, TimeUnit.SECONDS);
+                        if (file == null) {
+                            continue;
+                        }
+
+                        try (InputStream in = Files.newInputStream(file)) {
+                            DigitalObject obj = (DigitalObject) LOCAL_UNMARSHALLER.get().unmarshal(in);
+
+                            if (obj == null) {
+                                LOGGER.severe("Failed to unmarshal object from file: " + file);
+                                continue;
+                            }
+
+                            batch.add(obj.getPID());
+
+                            if (batch.size() >= BATCH_SIZE) {
+                                akubraRepository.pi().rebuildProcessingIndexBatch(new ArrayList<>(batch), null);
+                                batch.clear();
+                            }
+                        } catch (Exception e) {
+                            LOGGER.log(Level.SEVERE, "Error reading file: " + file, e);
+                        }
+                    } catch (Exception e) {
+                        LOGGER.log(Level.SEVERE, "Error processing batch", e);
                     }
-
-                    return FileVisitResult.CONTINUE;
                 }
-
-                @Override
-                public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException {
-                    LOGGER.log(Level.SEVERE, "Error processing file: " + file.toString(), exc);
-
-                    // This will allow the execution to continue uninterrupted,
-                    // even in the event of encountering permission errors.
-                    return FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
-                    if (exc != null) {
-                        LOGGER.log(Level.SEVERE, "Error searching directory : " + dir.toString(), exc);
+                // Flush remaining batch
+                if (!batch.isEmpty()) {
+                    try {
+                        akubraRepository.pi().rebuildProcessingIndexBatch(batch, null);
+                    } catch (Exception e) {
+                        LOGGER.log(Level.SEVERE, "Error flushing remaining batch", e);
                     }
-
-                    // This will allow the execution to continue uninterrupted,
-                    // even in the event of encountering permission errors.
-                    return FileVisitResult.CONTINUE;
                 }
             });
+        }
 
-            // Wait for all tasks to finish
-            forkJoinPool.shutdown();
-            try {
-                if (!forkJoinPool.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS)) {
-                    LOGGER.severe("ForkJoinPool did not terminate.");
-                }
-            } catch (InterruptedException e) {
-                LOGGER.log(Level.SEVERE, "Interrupted while waiting for ForkJoinPool to terminate", e);
-                Thread.currentThread().interrupt();
+        // Shutdown executors
+        producer.shutdown();
+        try {
+            if (!producer.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS)) {
+                LOGGER.severe("Producer did not terminate.");
             }
+        } catch (InterruptedException e) {
+            LOGGER.log(Level.SEVERE, "Producer interrupted during shutdown", e);
+            Thread.currentThread().interrupt();
+        }
+
+        consumers.shutdown();
+        try {
+            if (!consumers.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS)) {
+                LOGGER.severe("Consumers did not terminate.");
+            }
+        } catch (InterruptedException e) {
+            LOGGER.log(Level.SEVERE, "Consumers interrupted during shutdown", e);
+            Thread.currentThread().interrupt();
         }
 
         LOGGER.info("Finished tree walk in " + (System.currentTimeMillis() - start) + " ms");
@@ -168,36 +215,11 @@ public class ProcessingIndexRebuild {
         akubraRepository.shutdown();
     }
 
-    private static DigitalObject createDigitalObject(InputStream inputStream) {
-        DigitalObject obj = null;
-        try {
-            Unmarshaller unmarshaller = unmarshallerPool.take();
-            obj = (DigitalObject) unmarshaller.unmarshal(inputStream);
-            unmarshallerPool.offer(unmarshaller);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-        return obj;
-    }
-
-    // TODO: Change it; it can cause problem when traversing tree
     public static void rebuildProcessingIndex(AkubraRepository akubraRepository, DigitalObject digitalObject,Consumer<UpdateRequest> var2 ) {
         akubraRepository.pi().rebuildProcessingIndex(digitalObject.getPID(), var2);
     }
 
     public static void rebuildProcessingIndex(AkubraRepository akubraRepository, String pid, Consumer<UpdateRequest> var2) {
         akubraRepository.pi().rebuildProcessingIndex(pid, var2);
-    }
-
-    private static void initialize() {
-        try {
-            JAXBContext jaxbContext = JAXBContext.newInstance(DigitalObject.class);
-            for (int i = 0; i < UNMARSHALLER_POOL_CAPACITY; i++) {
-                unmarshallerPool.offer(jaxbContext.createUnmarshaller());
-            }
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Cannot init JAXB", e);
-            throw new RepositoryException(e);
-        }
     }
 }
