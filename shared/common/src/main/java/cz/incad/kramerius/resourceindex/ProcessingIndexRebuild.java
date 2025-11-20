@@ -45,7 +45,7 @@ import java.util.logging.Logger;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ArrayBlockingQueue;
 
 /**
  * Deklarace procesu je v shared/common/src/main/java/cz/incad/kramerius/processes/res/lp.st (processing_rebuild)
@@ -55,9 +55,9 @@ public class ProcessingIndexRebuild {
 
     private static final int BATCH_SIZE = 10000;
     private static final int PRODUCER_THREADS = 1;
-    private static final int CONSUMER_THREADS = Runtime.getRuntime().availableProcessors() * 8;
+    private static final int CONSUMER_THREADS = Runtime.getRuntime().availableProcessors() * 4;
 
-    private static final BlockingQueue<Path> fileQueue = new LinkedBlockingQueue<>(BATCH_SIZE * 2);
+    private static final BlockingQueue<Path> fileQueue = new ArrayBlockingQueue<>(BATCH_SIZE * 2);
     private static volatile boolean doneProducing = false;
     private static final AtomicLong pidsProcessed = new AtomicLong(0);
 
@@ -67,11 +67,13 @@ public class ProcessingIndexRebuild {
         } else {
             ProcessStarter.updateName("Přebudování Processing indexu");
         }
-        Injector injector = Guice.createInjector(new SolrModule(), new RepoModule(), new NullStatisticsModule());
-        final AkubraRepository akubraRepository = injector.getInstance(Key.get(AkubraRepository.class));
+
+        final AkubraRepository akubraRepository = getAkubraRepository();
+        akubraRepository.pi().deleteProcessingIndex();
+        akubraRepository.pi().commit();
+        akubraRepository.shutdown();
 
         long start = System.currentTimeMillis();
-        akubraRepository.pi().deleteProcessingIndex();
         Path objectStoreRoot = 
             KConfiguration.getInstance().getConfiguration().getBoolean("legacyfs")
             ? Paths.get(KConfiguration.getInstance().getProperty("object_store_base"))
@@ -148,6 +150,7 @@ public class ProcessingIndexRebuild {
         ExecutorService consumers = Executors.newFixedThreadPool(CONSUMER_THREADS);
         for (int i = 0; i < CONSUMER_THREADS; i++) {
             consumers.submit(() -> {
+                final AkubraRepository consumerRepo = getAkubraRepository();
                 List<String> batch = new ArrayList<>(BATCH_SIZE);
                 Path file;
                 while (!doneProducing || !fileQueue.isEmpty()) {
@@ -170,7 +173,7 @@ public class ProcessingIndexRebuild {
                             batch.add(pid);
 
                             if (batch.size() >= BATCH_SIZE) {
-                                akubraRepository.pi().rebuildProcessingIndexBatch(new ArrayList<>(batch), null);
+                                consumerRepo.pi().rebuildProcessingIndexBatch(batch, null);
                                 LOGGER.info("Processed " + pidsProcessed.addAndGet(batch.size()) + " PIDs so far");
                                 batch.clear();
                             }
@@ -184,12 +187,15 @@ public class ProcessingIndexRebuild {
                 // Flush remaining batch
                 if (!batch.isEmpty()) {
                     try {
-                        akubraRepository.pi().rebuildProcessingIndexBatch(batch, null);
+                        consumerRepo.pi().rebuildProcessingIndexBatch(batch, null);
                         LOGGER.info("Processed batch of " + batch.size() + " PIDs");
                     } catch (Exception e) {
                         LOGGER.log(Level.SEVERE, "Error flushing remaining batch", e);
                     }
                 }
+
+                consumerRepo.pi().commit();
+                consumerRepo.shutdown();
             });
         }
 
@@ -215,9 +221,11 @@ public class ProcessingIndexRebuild {
         }
 
         LOGGER.info("Finished tree walk in " + (System.currentTimeMillis() - start) + " ms");
+    }
 
-        akubraRepository.pi().commit();
-        akubraRepository.shutdown();
+    public static AkubraRepository getAkubraRepository() {
+        Injector injector = Guice.createInjector(new SolrModule(), new RepoModule(), new NullStatisticsModule());
+        return injector.getInstance(Key.get(AkubraRepository.class));
     }
 
     public static void rebuildProcessingIndex(AkubraRepository akubraRepository, DigitalObject digitalObject,Consumer<UpdateRequest> var2 ) {
