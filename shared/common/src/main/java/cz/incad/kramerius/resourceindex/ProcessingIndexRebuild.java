@@ -61,16 +61,6 @@ public class ProcessingIndexRebuild {
     private static final AtomicLong filesEnqueued = new AtomicLong(0);
     private static volatile boolean doneProducing = false;
 
-    // Thread-local unmarshaller for safe concurrent usage
-    private static final ThreadLocal<Unmarshaller> LOCAL_UNMARSHALLER = ThreadLocal.withInitial(() -> {
-        try {
-            JAXBContext context = JAXBContext.newInstance(DigitalObject.class);
-            return context.createUnmarshaller();
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to init unmarshaller", e);
-        }
-    });
-
     public static void main(String[] args) throws IOException, SolrServerException {
         if (args.length>=1 && "REBUILDPROCESSING".equalsIgnoreCase(args[0])){
             LOGGER.info("Přebudování Processing indexu");
@@ -86,6 +76,14 @@ public class ProcessingIndexRebuild {
             KConfiguration.getInstance().getConfiguration().getBoolean("legacyfs")
             ? Paths.get(KConfiguration.getInstance().getProperty("object_store_base"))
             : Paths.get(KConfiguration.getInstance().getProperty("objectStore.path"));
+        
+        LOGGER.info(
+            "Starting rebuild processing process with:"
+            + "\n\tObject store root path: " + objectStoreRoot.toString()
+            + "\n\tNumber of producer (file visitor) threads: " + PRODUCER_THREADS
+            + "\n\tNumber of consumer (unmarshalling and indexing) threads: " + CONSUMER_THREADS
+            + "\n\tIndex batch size: " + BATCH_SIZE
+        );
         
         // Producer: walk file tree and submit tasks
         ExecutorService producer = Executors.newFixedThreadPool(PRODUCER_THREADS);
@@ -163,15 +161,17 @@ public class ProcessingIndexRebuild {
                             continue;
                         }
 
-                        try (InputStream in = Files.newInputStream(file)) {
-                            DigitalObject obj = (DigitalObject) LOCAL_UNMARSHALLER.get().unmarshal(in);
+                        try {
+                            String filename = file.getFileName().toString();
 
-                            if (obj == null) {
-                                LOGGER.severe("Failed to unmarshal object from file: " + file);
+                            if (!filename.startsWith("info%3Afedora%2Fuuid%3A")) {
+                                LOGGER.warning("File name does not start with expected prefix: " + filename);
                                 continue;
                             }
 
-                            batch.add(obj.getPID());
+                            String pid = "uuid:" + filename.substring("info%3Afedora%2Fuuid%3A".length());
+
+                            batch.add(pid);
 
                             if (batch.size() >= BATCH_SIZE) {
                                 akubraRepository.pi().rebuildProcessingIndexBatch(new ArrayList<>(batch), null);
