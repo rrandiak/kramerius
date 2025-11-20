@@ -175,10 +175,9 @@ public class ProcessingIndexRebuild {
                                 } catch (Exception e) {
                                     LOGGER.severe("Error processing batch: " + e.getMessage() + " . Batch PIDs: " + String.join(", ", batch));
                                 } finally {
-                                    LOGGER.info("Processed batch of " + batch.size() + " PIDs");
+                                    LOGGER.info("Processed " + pidsProcessed.addAndGet(batch.size()) + " PIDs so far");
                                     batch.clear();
                                 }
-                                LOGGER.info("Processed " + pidsProcessed.addAndGet(batch.size()) + " PIDs so far");
                             }
                         } catch (Exception e) {
                             LOGGER.log(Level.SEVERE, "Error reading file: " + file, e);
