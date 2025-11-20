@@ -51,11 +51,11 @@ import java.util.concurrent.ArrayBlockingQueue;
  * Deklarace procesu je v shared/common/src/main/java/cz/incad/kramerius/processes/res/lp.st (processing_rebuild)
  */
 public class ProcessingIndexRebuild {
-    public static final Logger LOGGER = Logger.getLogger(ProcessingIndexCheck.class.getName());
+    public static final Logger LOGGER = Logger.getLogger(ProcessingIndexRebuild.class.getName());
 
-    private static final int BATCH_SIZE = 10000;
+    private static final int BATCH_SIZE = 1000;
     private static final int PRODUCER_THREADS = 1;
-    private static final int CONSUMER_THREADS = Runtime.getRuntime().availableProcessors() * 4;
+    private static final int CONSUMER_THREADS = Runtime.getRuntime().availableProcessors() * 2;
 
     private static final BlockingQueue<Path> fileQueue = new ArrayBlockingQueue<>(BATCH_SIZE * 2);
     private static volatile boolean doneProducing = false;
@@ -70,8 +70,6 @@ public class ProcessingIndexRebuild {
 
         final AkubraRepository akubraRepository = getAkubraRepository();
         akubraRepository.pi().deleteProcessingIndex();
-        akubraRepository.pi().commit();
-        akubraRepository.shutdown();
 
         long start = System.currentTimeMillis();
         Path objectStoreRoot = 
@@ -150,7 +148,6 @@ public class ProcessingIndexRebuild {
         ExecutorService consumers = Executors.newFixedThreadPool(CONSUMER_THREADS);
         for (int i = 0; i < CONSUMER_THREADS; i++) {
             consumers.submit(() -> {
-                final AkubraRepository consumerRepo = getAkubraRepository();
                 List<String> batch = new ArrayList<>(BATCH_SIZE);
                 Path file;
                 while (!doneProducing || !fileQueue.isEmpty()) {
@@ -173,9 +170,15 @@ public class ProcessingIndexRebuild {
                             batch.add(pid);
 
                             if (batch.size() >= BATCH_SIZE) {
-                                consumerRepo.pi().rebuildProcessingIndexBatch(batch, null);
+                                try {
+                                    akubraRepository.pi().rebuildProcessingIndexBatch(batch, null);
+                                } catch (Exception e) {
+                                    LOGGER.severe("Error processing batch: " + e.getMessage() + " . Batch PIDs: " + String.join(", ", batch));
+                                } finally {
+                                    LOGGER.info("Processed batch of " + batch.size() + " PIDs");
+                                    batch.clear();
+                                }
                                 LOGGER.info("Processed " + pidsProcessed.addAndGet(batch.size()) + " PIDs so far");
-                                batch.clear();
                             }
                         } catch (Exception e) {
                             LOGGER.log(Level.SEVERE, "Error reading file: " + file, e);
@@ -187,15 +190,12 @@ public class ProcessingIndexRebuild {
                 // Flush remaining batch
                 if (!batch.isEmpty()) {
                     try {
-                        consumerRepo.pi().rebuildProcessingIndexBatch(batch, null);
+                        akubraRepository.pi().rebuildProcessingIndexBatch(batch, null);
                         LOGGER.info("Processed batch of " + batch.size() + " PIDs");
                     } catch (Exception e) {
                         LOGGER.log(Level.SEVERE, "Error flushing remaining batch", e);
                     }
                 }
-
-                consumerRepo.pi().commit();
-                consumerRepo.shutdown();
             });
         }
 
@@ -221,6 +221,9 @@ public class ProcessingIndexRebuild {
         }
 
         LOGGER.info("Finished tree walk in " + (System.currentTimeMillis() - start) + " ms");
+
+        akubraRepository.pi().commit();
+        akubraRepository.shutdown();
     }
 
     public static AkubraRepository getAkubraRepository() {
