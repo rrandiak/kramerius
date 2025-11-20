@@ -55,7 +55,7 @@ public class ProcessingIndexRebuild {
     private static final int BATCH_SIZE = 10000;
     private static final int PRODUCER_THREADS = 1;
     private static final int CONSUMER_THREADS = Math.min(32, Runtime.getRuntime().availableProcessors() * 2);
-    private static final BlockingQueue<Path> FILE_QUEUE = new LinkedBlockingQueue<>(BATCH_SIZE * 2);
+    private static final BlockingQueue<Path> FILE_QUEUE = new LinkedBlockingQueue<>(BATCH_SIZE * (CONSUMER_THREADS / 2));
     private static volatile boolean doneProducing = false;
 
     // Thread-local unmarshaller for safe concurrent usage
@@ -169,6 +169,7 @@ public class ProcessingIndexRebuild {
                             if (batch.size() >= BATCH_SIZE) {
                                 akubraRepository.pi().rebuildProcessingIndexBatch(new ArrayList<>(batch), null);
                                 batch.clear();
+                                LOGGER.info("Processed batch of " + BATCH_SIZE + " PIDs");
                             }
                         } catch (Exception e) {
                             LOGGER.log(Level.SEVERE, "Error reading file: " + file, e);
@@ -181,6 +182,7 @@ public class ProcessingIndexRebuild {
                 if (!batch.isEmpty()) {
                     try {
                         akubraRepository.pi().rebuildProcessingIndexBatch(batch, null);
+                        LOGGER.info("Processed batch of " + batch.size() + " PIDs");
                     } catch (Exception e) {
                         LOGGER.log(Level.SEVERE, "Error flushing remaining batch", e);
                     }
