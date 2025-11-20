@@ -58,8 +58,8 @@ public class ProcessingIndexRebuild {
     private static final int CONSUMER_THREADS = Math.min(32, Runtime.getRuntime().availableProcessors() * 2);
     
     private static final BlockingQueue<Path> fileQueue = new LinkedBlockingQueue<>(BATCH_SIZE * (CONSUMER_THREADS / 2));
-    private static final AtomicLong filesEnqueued = new AtomicLong(0);
     private static volatile boolean doneProducing = false;
+    private static final AtomicLong pidsProcessed = new AtomicLong(0);
 
     public static void main(String[] args) throws IOException, SolrServerException {
         if (args.length>=1 && "REBUILDPROCESSING".equalsIgnoreCase(args[0])){
@@ -108,10 +108,6 @@ public class ProcessingIndexRebuild {
 
                             try {
                                 fileQueue.put(file);
-                                long count = filesEnqueued.incrementAndGet();
-                                if (count % 10000 == 0) {
-                                    LOGGER.info("Enqueued " + count + " files for processing so far...");
-                                }
                             } catch (InterruptedException e) {
                                 Thread.currentThread().interrupt();
                                 throw new IOException("Producer thread interrupted", e);
@@ -175,8 +171,8 @@ public class ProcessingIndexRebuild {
 
                             if (batch.size() >= BATCH_SIZE) {
                                 akubraRepository.pi().rebuildProcessingIndexBatch(new ArrayList<>(batch), null);
+                                LOGGER.info("Processed " + pidsProcessed.addAndGet(batch.size()) + " PIDs so far");
                                 batch.clear();
-                                LOGGER.info("Processed batch of " + BATCH_SIZE + " PIDs");
                             }
                         } catch (Exception e) {
                             LOGGER.log(Level.SEVERE, "Error reading file: " + file, e);
