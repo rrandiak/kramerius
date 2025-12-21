@@ -155,6 +155,8 @@ allprojects {
         testImplementation "junit:junit:4.4"
         //testCompile "org.easymock:easymock:3.0"
         testImplementation "org.easymock:easymock:4.3"
+
+        implementation "org.ceskaexpedice:akubra:${akubraversion}"
     }
 
     repositories {
@@ -247,19 +249,19 @@ allprojects {
             }
 		}
 
-		maven {
-			url "https://maven.pkg.github.com/ceskaexpedice/akubra"
-            credentials {
-                if (project.hasProperty('githubRepositoryUser') && project.hasProperty('githubRepositoryToken')) {
-                    println "Using project properties for GitHub credentials"
-                    username = "$githubRepositoryUser"
-                    password = "$githubRepositoryToken"
-                } else {
-                    username = System.getenv("USERNAME")
-                    password = System.getenv("TOKEN")
-                }
-            }
-		}
+		// maven {
+		// 	url "https://maven.pkg.github.com/ceskaexpedice/akubra"
+        //     credentials {
+        //         if (project.hasProperty('githubRepositoryUser') && project.hasProperty('githubRepositoryToken')) {
+        //             println "Using project properties for GitHub credentials"
+        //             username = "$githubRepositoryUser"
+        //             password = "$githubRepositoryToken"
+        //         } else {
+        //             username = System.getenv("USERNAME")
+        //             password = System.getenv("TOKEN")
+        //         }
+        //     }
+		// }
     }
 
     tasks.withType(Javadoc) {

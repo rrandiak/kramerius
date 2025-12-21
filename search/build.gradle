@@ -214,7 +214,7 @@ jib {
         }
     }
     to {
-        image = "ceskaexpedice/kramerius:${version}"
+        image = "registry.gitlab.mzk.cz/osdd/kramerius/kramerius:${version}"
     }
     container {
         appRoot = '/usr/local/tomcat/webapps/search'
