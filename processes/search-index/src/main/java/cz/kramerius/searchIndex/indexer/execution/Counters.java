@@ -1,51 +1,62 @@
 package cz.kramerius.searchIndex.indexer.execution;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
 public class Counters {
 
-    private long startTimestamp = System.currentTimeMillis();
+    private final long startTimestamp = System.currentTimeMillis();
 
-    private int processed = 0;
-    private int indexed = 0;
-    private int ignored = 0;
-    private int removed = 0;
-    private int errors = 0;
+    private final AtomicInteger processed = new AtomicInteger(0);
+    private final AtomicInteger indexed = new AtomicInteger(0);
+    private final AtomicInteger ignored = new AtomicInteger(0);
+    private final AtomicInteger removed = new AtomicInteger(0);
+    private final AtomicInteger errors = new AtomicInteger(0);
 
     public long getStartTimestamp() {
         return startTimestamp;
     }
 
     public void incrementProcessed() {
-        processed += 1;
+        processed.incrementAndGet();
     }
 
     public void incrementIndexed() {
-        indexed += 1;
+        indexed.incrementAndGet();
+    }
+
+    public void incrementIndexedBy(int count) {
+        indexed.addAndGet(count);
     }
 
     public void incrementIgnored() {
-        ignored += 1;
+        ignored.incrementAndGet();
     }
 
-    public void incrementRemoved() { removed += 1; }
+    public void incrementRemoved() {
+        removed.incrementAndGet();
+    }
 
     public void incrementErrors() {
-        errors += 1;
+        errors.incrementAndGet();
     }
 
     public int getProcessed() {
-        return processed;
+        return processed.get();
     }
 
     public int getIndexed() {
-        return indexed;
+        return indexed.get();
     }
 
-    public int getIgnored() { return ignored; }
+    public int getIgnored() {
+        return ignored.get();
+    }
 
-    public int getRemoved() { return removed; }
+    public int getRemoved() {
+        return removed.get();
+    }
 
     public int getErrors() {
-        return errors;
+        return errors.get();
     }
-
 }

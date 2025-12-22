@@ -114,6 +114,7 @@ public class NewIndexerProcessIndexModel {
             processed += titleIdPairs.size();
             List<ProcessingIndexItem> toBeIndexed = filters.indexAll() ? titleIdPairs : filter(solrAccess, titleIdPairs, filters);
             Counters counters = new Counters();
+            indexer.initBatchUpdater(counters);
             nowIgnored += titleIdPairs.size() - toBeIndexed.size();
             for (ProcessingIndexItem titlePidPair : toBeIndexed) {
                 String title = titlePidPair.dcTitle();
@@ -143,6 +144,8 @@ public class NewIndexerProcessIndexModel {
                     e.printStackTrace();
                     LOGGER.log(Level.SEVERE,e.getMessage(),e);
                     nowErrors++;
+                    indexer.shutdownBatchUpdater();
+                    indexer.initBatchUpdater(counters);
                 }
             }
         }

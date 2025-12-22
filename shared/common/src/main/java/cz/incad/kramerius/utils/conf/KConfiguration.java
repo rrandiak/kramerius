@@ -218,6 +218,14 @@ public class KConfiguration {
         return getConfiguration().getInt("unmarshallerPoolSize", 16);
     }
 
+    public int getIndexationSearchBatchSize() {
+        return getConfiguration().getInt("indexation.search.batchSize", 100);
+    }
+
+    public int getIndexationSearchThreads() {
+        return getConfiguration().getInt("indexation.search.threads", 4);
+    }
+
     public String getProperty(String key) {
         return allConfigurations.getString(key);
     }
