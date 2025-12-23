@@ -219,11 +219,11 @@ public class KConfiguration {
     }
 
     public int getIndexationSearchBatchSize() {
-        return getConfiguration().getInt("indexation.search.batchSize", 100);
+        return getConfiguration().getInt("indexation.search.batchSize", 500);
     }
 
     public int getIndexationSearchThreads() {
-        return getConfiguration().getInt("indexation.search.threads", 4);
+        return getConfiguration().getInt("indexation.search.threads", 24);
     }
 
     public String getProperty(String key) {
