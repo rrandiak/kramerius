@@ -19,15 +19,16 @@ public class SolrBatchUpdater extends AbstractSolrBatchUpdater {
      * @param batchSize the maximum number of documents per batch sent to Solr
      * @param numParallel the maximum number of concurrent batch update threads
      * @param solrClient the SolrClient instance used for updates
+     * @param collection the Solr collection to update
      */
-    public SolrBatchUpdater(int batchSize, int numParallel, SolrClient solrClient) {
-        super(batchSize, numParallel, solrClient);
+    public SolrBatchUpdater(int batchSize, int numParallel, SolrClient solrClient, String collection) {
+        super(batchSize, numParallel, solrClient, collection);
     }
 
     @Override
     protected void updateSingle(SolrInputDocument doc) {
         try {
-            solrClient.add(doc);
+            solrClient.add(this.collection, doc);
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Failed to update single document", e);
         }
@@ -36,7 +37,7 @@ public class SolrBatchUpdater extends AbstractSolrBatchUpdater {
     @Override
     protected void updateBatch(List<SolrInputDocument> docs) {
         try {
-            solrClient.add(docs);
+            solrClient.add(this.collection, docs);
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Failed to update batch of " + docs.size() + " documents", e);
 

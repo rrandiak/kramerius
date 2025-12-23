@@ -53,6 +53,7 @@ public abstract class AbstractSolrBatchUpdater {
     private final int maxParallel;
 
     protected final SolrClient solrClient;
+    protected final String collection;
 
     private final SolrInputDocument[] buffer;
     private final ExecutorService executor;
@@ -67,13 +68,15 @@ public abstract class AbstractSolrBatchUpdater {
      * @param batchSize the maximum number of documents per batch sent to Solr
      * @param numParallel the maximum number of concurrent batch update threads
      * @param solrClient the SolrClient instance used for updates
+     * @param collection the Solr collection to update
      */
-    public AbstractSolrBatchUpdater(int batchSize, int numParallel, SolrClient solrClient) {
+    public AbstractSolrBatchUpdater(int batchSize, int numParallel, SolrClient solrClient, String collection) {
         this.capacity = 2 * batchSize * numParallel;
         this.batchSize = batchSize;
         this.maxParallel = numParallel;
 
         this.solrClient = solrClient;
+        this.collection = collection;
 
         this.buffer = new SolrInputDocument[capacity];
 

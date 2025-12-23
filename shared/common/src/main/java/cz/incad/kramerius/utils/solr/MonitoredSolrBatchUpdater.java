@@ -26,6 +26,7 @@ public class MonitoredSolrBatchUpdater extends AbstractSolrBatchUpdater {
      * @param batchSize the maximum number of documents per batch sent to Solr
      * @param numParallel the maximum number of concurrent batch update threads
      * @param solrClient the SolrClient instance used for updates
+     * @param collection the Solr collection to update
      * @param onIndexed callback invoked after a document is successfully indexed
      * @param onIndexedBatch callback invoked after a batch of documents is successfully indexed
      * @param onFailed callback invoked after a document fails to index
@@ -34,11 +35,12 @@ public class MonitoredSolrBatchUpdater extends AbstractSolrBatchUpdater {
         int batchSize,
         int numParallel,
         SolrClient solrClient,
+        String collection,
         Consumer<SolrInputDocument> onIndexed,
         Consumer<List<SolrInputDocument>> onIndexedBatch,
         BiConsumer<SolrInputDocument, Exception> onFailed
     ) {
-        super(batchSize, numParallel, solrClient);
+        super(batchSize, numParallel, solrClient, collection);
         this.onIndexed = onIndexed;
         this.onIndexedBatch = onIndexedBatch;
         this.onFailed = onFailed;
@@ -47,7 +49,7 @@ public class MonitoredSolrBatchUpdater extends AbstractSolrBatchUpdater {
     @Override
     protected void updateSingle(SolrInputDocument doc) {
         try {
-            solrClient.add(doc);
+            solrClient.add(this.collection, doc);
             onIndexed.accept(doc);
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Failed to update single document", e);
@@ -58,7 +60,7 @@ public class MonitoredSolrBatchUpdater extends AbstractSolrBatchUpdater {
     @Override
     protected void updateBatch(List<SolrInputDocument> docs) {
         try {
-            solrClient.add(docs);
+            solrClient.add(this.collection, docs);
             onIndexedBatch.accept(docs);
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Failed to update batch of " + docs.size() + " documents", e);

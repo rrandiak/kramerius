@@ -153,6 +153,7 @@ public class SolrIndexAccess {
             Kconfig.getIndexationSearchBatchSize(),
             Kconfig.getIndexationSearchThreads(),
             solrClient,
+            collection,
             onIndexed,
             onIndexedBatch,
             onFailed
