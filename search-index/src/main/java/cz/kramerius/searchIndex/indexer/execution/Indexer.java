@@ -49,7 +49,7 @@ public class Indexer {
 
     private boolean ignoreInconsistentObjects=true;
 
-    private static final int THREAD_POOL_SIZE = 16;
+    private static final int THREAD_POOL_SIZE = 64;
     private final ExecutorService treeIndexationExecutor = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
 
     ExecutorService reporter = Executors.newSingleThreadExecutor();
