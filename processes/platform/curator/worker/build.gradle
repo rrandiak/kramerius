@@ -30,7 +30,7 @@ dependencies {
     // flag to license
     implementation project(":processes:platform:curator:flag-to-license")
     // backup-collections
-    implementation project(":processes:platform:curator:backup-collections")
+    // implementation project(":processes:platform:curator:backup-collections")
     // migrate-collections
     implementation project(":processes:platform:curator:migrate-collections")
     // sdnnt-sync
@@ -63,7 +63,7 @@ processWorker {
 
 
         project(":processes:platform:curator:flag-to-license"),
-        project(":processes:platform:curator:backup-collections"),
+        // project(":processes:platform:curator:backup-collections"),
         project(":processes:platform:curator:migrate-collections"),
         project(":processes:platform:curator:sdnnt-sync"),
         project(":processes:platform:curator:update-foxml")
