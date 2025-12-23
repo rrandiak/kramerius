@@ -26,6 +26,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -84,18 +86,23 @@ public class Indexer {
         init();
     }
 
+    ExecutorService reporter = Executors.newSingleThreadExecutor();
+
     private void report(String message) {
-        reportLogger.report(message);
+        // reportLogger.report(message);
+        reporter.execute(() -> reportLogger.report(message));
         LOGGER.log(Level.INFO,message);
     }
 
     private void reportError(String message) {
-        reportLogger.report(message);
+        // reportLogger.report(message);
+        reporter.execute(() -> reportLogger.report(message));
         LOGGER.log(Level.SEVERE,message);
     }
 
     private void reportError(String message, Throwable e) {
-        reportLogger.report(message, e);
+        // reportLogger.report(message, e);
+        reporter.execute(() -> reportLogger.report(message, e));
         LOGGER.log(Level.SEVERE,e.getMessage(), e);
     }
     
@@ -386,6 +393,8 @@ public class Indexer {
                 .replaceAll("\\s+", " ");
     }
 
+    ExecutorService treeIndexationExecutor = Executors.newFixedThreadPool(16);
+
     private void processChildren(String parentPid, RepositoryNode parentNode, Counters counters, IndexationType type, boolean isIndexationRoot, ProgressListener progressListener) {
         if (parentNode == null) {
             LOGGER.log(Level.SEVERE, "object not found in repository (or found in inconsistent state), ignoring it's children: " + parentPid);
@@ -464,14 +473,18 @@ public class Indexer {
             break;
             case TREE_AND_FOSTER_TREES: {
                 for (String childPid : parentNode.getPidsOfOwnChildren()) {
-                    RepositoryNode childNode = nodeManager.getKrameriusNode(childPid);
-                    indexObjectWithCounters(childPid, childNode, counters, false, progressListener); //index own child
-                    processChildren(childPid, childNode, counters, type, false, progressListener); //process own child's tree
+                    treeIndexationExecutor.execute(() -> {
+                        RepositoryNode childNode = nodeManager.getKrameriusNode(childPid);
+                        indexObjectWithCounters(childPid, childNode, counters, false, progressListener); //index own child
+                        processChildren(childPid, childNode, counters, type, false, progressListener); //process own child's tree
+                    });
                 }
                 for (String childPid : parentNode.getPidsOfFosterChildren()) {
-                    RepositoryNode childNode = nodeManager.getKrameriusNode(childPid);
-                    indexObjectWithCounters(childPid, childNode, counters, false, progressListener); //index foster child
-                    processChildren(childPid, childNode, counters, type, false, progressListener); //process foster child's tree
+                    treeIndexationExecutor.execute(() -> {
+                        RepositoryNode childNode = nodeManager.getKrameriusNode(childPid);
+                        indexObjectWithCounters(childPid, childNode, counters, false, progressListener); //index foster child
+                        processChildren(childPid, childNode, counters, type, false, progressListener); //process foster child's tree
+                    });
                 }
             }
         }
