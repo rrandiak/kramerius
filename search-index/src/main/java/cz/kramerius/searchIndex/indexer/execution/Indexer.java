@@ -42,12 +42,18 @@ public class Indexer {
     //helpers
     private final ReportLogger reportLogger;
     private final AkubraRepository akubraRepository;
-    private final RepositoryNodeManager nodeManager;
+    // private final RepositoryNodeManager nodeManager;
 
     private final SolrInputBuilder solrInputBuilder;
     private SolrIndexAccess solrIndexer = null;
 
     private boolean ignoreInconsistentObjects=true;
+
+    private static final int THREAD_POOL_SIZE = 16;
+    private final ExecutorService treeIndexationExecutor = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
+
+    ExecutorService reporter = Executors.newSingleThreadExecutor();
+    private final ThreadLocal<RepositoryNodeManager> nodeManagerTL;
 
     public static String getCompositeId(RepositoryNode repositoryNode, String pid) {
         String rootPid = (repositoryNode != null) ? repositoryNode.getRootPid() : "null";
@@ -78,15 +84,16 @@ public class Indexer {
 
     public Indexer(AkubraRepository akubraRepository, SolrConfig solrConfig, OutputStream reportLoggerStream, boolean ignoreInconsistentObjects) {
         this.akubraRepository = akubraRepository;
-        this.nodeManager = new RepositoryNodeManager(akubraRepository, ignoreInconsistentObjects);
+        // this.nodeManager = new RepositoryNodeManager(akubraRepository, ignoreInconsistentObjects);
         this.solrInputBuilder = new SolrInputBuilder();
         this.solrConfig = solrConfig;
         this.reportLogger = new ReportLogger(reportLoggerStream);
         this.ignoreInconsistentObjects = ignoreInconsistentObjects;
+        this.nodeManagerTL = ThreadLocal.withInitial(() ->
+            new RepositoryNodeManager(akubraRepository, ignoreInconsistentObjects)
+        );
         init();
     }
-
-    ExecutorService reporter = Executors.newSingleThreadExecutor();
 
     private void report(String message) {
         // reportLogger.report(message);
@@ -147,7 +154,7 @@ public class Indexer {
         } else {
             //Counters counters = new Counters();
             LOGGER.info("Processing " + pid + " (indexation type: " + type + ")");
-            RepositoryNode node = nodeManager.getKrameriusNode(pid);
+            RepositoryNode node = nodeManagerTL.get().getKrameriusNode(pid);
             boolean setFullIndexationInProgress = type == IndexationType.TREE_AND_FOSTER_TREES;
             if (node != null && setFullIndexationInProgress) {
                 setFullIndexationInProgress(pid, node);
@@ -289,7 +296,7 @@ public class Indexer {
                     Pair<String,Integer> tuple = getLastWordAndOffsetIfHyphen(ocrText);
                     if(tuple != null) {
                         int pos = repositoryNode.getPositionInOwnParent();
-                        List<String> syblings = nodeManager.getKrameriusNode(repositoryNode.getOwnParentPid()).getPidsOfOwnChildren();
+                        List<String> syblings = nodeManagerTL.get().getKrameriusNode(repositoryNode.getOwnParentPid()).getPidsOfOwnChildren();
                         if (syblings.size() > pos+1) {
                             String nextPid = syblings.get(pos + 1);
                             if (akubraRepository.datastreamExists(nextPid, KnownDatastreams.OCR_TEXT)) {
@@ -311,13 +318,13 @@ public class Indexer {
 
                 Integer audioLength = "track".equals(repositoryNode.getModel()) ? detectAudioLength(repositoryNode.getPid()) : null;
                 try {
-                    SolrInput solrInput = solrInputBuilder.processObjectFromRepository(akubraRepository, foxmlDoc, ocrText, repositoryNode, nodeManager, imgFullMime, audioLength, setFullIndexationInProgress);
+                    SolrInput solrInput = solrInputBuilder.processObjectFromRepository(akubraRepository, foxmlDoc, ocrText, repositoryNode, nodeManagerTL.get(), imgFullMime, audioLength, setFullIndexationInProgress);
                     String solrInputStr = solrInput.getDocument().asXML();
                     // solrIndexer.indexFromXmlString(solrInputStr, false);
                     solrIndexer.indexFromXmlStringUsingBatchUpdater(solrInputStr);
                 } catch (DocumentException e) {  //try to reindex without ocr - TODO: hack, ocr should be properly escaped
                     //typical root cause: Caused by: org.xml.sax.SAXParseException; lineNumber: 2; columnNumber: 2302; Character reference "&#6" is an invalid XML character.
-                    SolrInput solrInput = solrInputBuilder.processObjectFromRepository(akubraRepository, foxmlDoc, "", repositoryNode, nodeManager, imgFullMime, audioLength, setFullIndexationInProgress);
+                    SolrInput solrInput = solrInputBuilder.processObjectFromRepository(akubraRepository, foxmlDoc, "", repositoryNode, nodeManagerTL.get(), imgFullMime, audioLength, setFullIndexationInProgress);
                     String solrInputStr = solrInput.getDocument().asXML();
                     // solrIndexer.indexFromXmlString(solrInputStr, false);
                     solrIndexer.indexFromXmlStringUsingBatchUpdater(solrInputStr);
@@ -376,7 +383,7 @@ public class Indexer {
             counters.incrementProcessed();
             report("extracting page " + pageNumber + "/" + pages);
             String ocrText = normalizeWhitespacesForOcrText(extractor.getPageText(i));
-            SolrInput solrInput = solrInputBuilder.processPageFromPdf(nodeManager, repositoryNode, pageNumber, ocrText);
+            SolrInput solrInput = solrInputBuilder.processPageFromPdf(nodeManagerTL.get(), repositoryNode, pageNumber, ocrText);
             String solrInputStr = solrInput.getDocument().asXML();
             // solrIndexer.indexFromXmlString(solrInputStr, false);
             // counters.incrementIndexed();
@@ -393,8 +400,6 @@ public class Indexer {
                 .replaceAll("\\s+", " ");
     }
 
-    ExecutorService treeIndexationExecutor = Executors.newFixedThreadPool(16);
-
     private void processChildren(String parentPid, RepositoryNode parentNode, Counters counters, IndexationType type, boolean isIndexationRoot, ProgressListener progressListener) {
         if (parentNode == null) {
             LOGGER.log(Level.SEVERE, "object not found in repository (or found in inconsistent state), ignoring it's children: " + parentPid);
@@ -408,11 +413,11 @@ public class Indexer {
             case OBJECT_AND_CHILDREN: {
                 if (isIndexationRoot) {
                     for (String childPid : parentNode.getPidsOfOwnChildren()) {
-                        RepositoryNode childNode = nodeManager.getKrameriusNode(childPid);
+                        RepositoryNode childNode = nodeManagerTL.get().getKrameriusNode(childPid);
                         indexObjectWithCounters(childPid, childNode, counters, false, progressListener); //index own child
                     }
                     for (String childPid : parentNode.getPidsOfFosterChildren()) {
-                        RepositoryNode childNode = nodeManager.getKrameriusNode(childPid);
+                        RepositoryNode childNode = nodeManagerTL.get().getKrameriusNode(childPid);
                         indexObjectWithCounters(childPid, childNode, counters, false, progressListener); //index foster child
                     }
                 }
@@ -420,7 +425,7 @@ public class Indexer {
             break;
             case TREE: {
                 for (String childPid : parentNode.getPidsOfOwnChildren()) { //index own children
-                    RepositoryNode childNode = nodeManager.getKrameriusNode(childPid);
+                    RepositoryNode childNode = nodeManagerTL.get().getKrameriusNode(childPid);
                     indexObjectWithCounters(childPid, childNode, counters, false, progressListener); //index own child
                     processChildren(childPid, childNode, counters, type, false, progressListener); //process own child's tree
                 }
@@ -428,7 +433,7 @@ public class Indexer {
             break;
             case TREE_INDEX_ONLY_NEWER: {
                 for (String childPid : parentNode.getPidsOfOwnChildren()) { //index own children
-                    RepositoryNode childNode = nodeManager.getKrameriusNode(childPid);
+                    RepositoryNode childNode = nodeManagerTL.get().getKrameriusNode(childPid);
                     boolean isNewer = true; //TODO: detect
                     if (isNewer) {
                         indexObjectWithCounters(childPid, childNode, counters, false, progressListener); //index own child
@@ -439,7 +444,7 @@ public class Indexer {
             break;
             case TREE_PROCESS_ONLY_NEWER: {
                 for (String childPid : parentNode.getPidsOfOwnChildren()) { //index own children
-                    RepositoryNode childNode = nodeManager.getKrameriusNode(childPid);
+                    RepositoryNode childNode = nodeManagerTL.get().getKrameriusNode(childPid);
                     boolean isNewer = true; //TODO: detect
                     if (isNewer) {
                         indexObjectWithCounters(childPid, childNode, counters, false, progressListener); //index own child
@@ -450,7 +455,7 @@ public class Indexer {
             break;
             case TREE_INDEX_ONLY_PAGES: {
                 for (String childPid : parentNode.getPidsOfOwnChildren()) { //index own children
-                    RepositoryNode childNode = nodeManager.getKrameriusNode(childPid);
+                    RepositoryNode childNode = nodeManagerTL.get().getKrameriusNode(childPid);
                     boolean isPage = true; //TODO: detect
                     if (isPage) {
                         indexObjectWithCounters(childPid, childNode, counters, false, progressListener); //index own child
@@ -462,7 +467,7 @@ public class Indexer {
             break;
             case TREE_INDEX_ONLY_NONPAGES: {
                 for (String childPid : parentNode.getPidsOfOwnChildren()) { //index own children
-                    RepositoryNode childNode = nodeManager.getKrameriusNode(childPid);
+                    RepositoryNode childNode = nodeManagerTL.get().getKrameriusNode(childPid);
                     boolean isPage = false; //TODO: detect
                     if (!isPage) {
                         indexObjectWithCounters(childPid, childNode, counters, false, progressListener); //index own child
@@ -474,14 +479,14 @@ public class Indexer {
             case TREE_AND_FOSTER_TREES: {
                 for (String childPid : parentNode.getPidsOfOwnChildren()) {
                     treeIndexationExecutor.execute(() -> {
-                        RepositoryNode childNode = nodeManager.getKrameriusNode(childPid);
+                        RepositoryNode childNode = nodeManagerTL.get().getKrameriusNode(childPid);
                         indexObjectWithCounters(childPid, childNode, counters, false, progressListener); //index own child
                         processChildren(childPid, childNode, counters, type, false, progressListener); //process own child's tree
                     });
                 }
                 for (String childPid : parentNode.getPidsOfFosterChildren()) {
                     treeIndexationExecutor.execute(() -> {
-                        RepositoryNode childNode = nodeManager.getKrameriusNode(childPid);
+                        RepositoryNode childNode = nodeManagerTL.get().getKrameriusNode(childPid);
                         indexObjectWithCounters(childPid, childNode, counters, false, progressListener); //index foster child
                         processChildren(childPid, childNode, counters, type, false, progressListener); //process foster child's tree
                     });
