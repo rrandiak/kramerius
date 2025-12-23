@@ -9,6 +9,7 @@ import cz.kramerius.searchIndex.indexer.conversions.SolrInputBuilder;
 import cz.kramerius.searchIndex.indexer.conversions.extraction.AudioAnalyzer;
 import cz.kramerius.searchIndex.indexer.nodes.RepositoryNode;
 import cz.kramerius.searchIndex.indexer.nodes.RepositoryNodeManager;
+
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.common.SolrDocument;
@@ -31,7 +32,6 @@ import java.util.logging.Logger;
 public class Indexer {
     private static final Logger LOGGER = Logger.getLogger(Indexer.class.getName());
 
-    //public static final int INDEXER_VERSION = 21; //this should be updated after every change in logic, that affects full indexation
     public static final int INDEXER_VERSION = 22; //this should be updated after every change in logic, that affects full indexation
 
     private final SolrConfig solrConfig;
@@ -118,6 +118,20 @@ public class Indexer {
         report(" ");
     }
 
+    public void initBatchUpdater(Counters counters) {
+        solrIndexer.initBatchUpdater(
+            doc -> counters.incrementIndexed(),
+            docs -> counters.incrementIndexedBy(docs.size()),
+            (doc, e) -> {
+                counters.incrementErrors();
+                reportError("Error indexing document with PID " + doc.getFieldValue("pid"), e);
+            }
+        );
+    }
+
+    public void shutdownBatchUpdater() {
+        solrIndexer.shutdownBatchUpdater();
+    }
 
 
     public void indexByObjectPid(String pid, IndexationType type, Counters counters, boolean commitAfterPid, ProgressListener progressListener) {
@@ -133,6 +147,9 @@ public class Indexer {
             }
             indexObjectWithCounters(pid, node, counters, setFullIndexationInProgress, progressListener);
             processChildren(pid, node, counters, type, true, progressListener);
+            // flush batch updater to ensure all documents are indexed
+            solrIndexer.flushBatchUpdater();
+            // clearing full_indexation_in_progress flag after finishing indexation of the whole tree
             if (node != null && setFullIndexationInProgress) {
                 clearFullIndexationInProgress(pid, node);
             }
@@ -289,14 +306,16 @@ public class Indexer {
                 try {
                     SolrInput solrInput = solrInputBuilder.processObjectFromRepository(akubraRepository, foxmlDoc, ocrText, repositoryNode, nodeManager, imgFullMime, audioLength, setFullIndexationInProgress);
                     String solrInputStr = solrInput.getDocument().asXML();
-                    solrIndexer.indexFromXmlString(solrInputStr, false);
+                    // solrIndexer.indexFromXmlString(solrInputStr, false);
+                    solrIndexer.indexFromXmlStringUsingBatchUpdater(solrInputStr);
                 } catch (DocumentException e) {  //try to reindex without ocr - TODO: hack, ocr should be properly escaped
                     //typical root cause: Caused by: org.xml.sax.SAXParseException; lineNumber: 2; columnNumber: 2302; Character reference "&#6" is an invalid XML character.
                     SolrInput solrInput = solrInputBuilder.processObjectFromRepository(akubraRepository, foxmlDoc, "", repositoryNode, nodeManager, imgFullMime, audioLength, setFullIndexationInProgress);
                     String solrInputStr = solrInput.getDocument().asXML();
-                    solrIndexer.indexFromXmlString(solrInputStr, false);
+                    // solrIndexer.indexFromXmlString(solrInputStr, false);
+                    solrIndexer.indexFromXmlStringUsingBatchUpdater(solrInputStr);
                 }
-                counters.incrementIndexed();
+                // counters.incrementIndexed();
                 report("");
                 if ("application/pdf".equals(imgFullMime)) {
                     indexPagesFromPdf(pid, repositoryNode, counters);
@@ -352,8 +371,9 @@ public class Indexer {
             String ocrText = normalizeWhitespacesForOcrText(extractor.getPageText(i));
             SolrInput solrInput = solrInputBuilder.processPageFromPdf(nodeManager, repositoryNode, pageNumber, ocrText);
             String solrInputStr = solrInput.getDocument().asXML();
-            solrIndexer.indexFromXmlString(solrInputStr, false);
-            counters.incrementIndexed();
+            // solrIndexer.indexFromXmlString(solrInputStr, false);
+            // counters.incrementIndexed();
+            solrIndexer.indexFromXmlStringUsingBatchUpdater(solrInputStr);
             report("");
         }
     }

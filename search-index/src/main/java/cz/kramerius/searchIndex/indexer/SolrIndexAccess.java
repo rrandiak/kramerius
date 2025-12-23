@@ -2,6 +2,8 @@ package cz.kramerius.searchIndex.indexer;
 
 import cz.incad.kramerius.utils.IterationUtils;
 import cz.incad.kramerius.utils.conf.KConfiguration;
+import cz.incad.kramerius.utils.solr.MonitoredSolrBatchUpdater;
+import cz.kramerius.searchIndex.indexer.execution.Counters;
 import cz.kramerius.searchIndex.indexer.nodes.RepositoryNode;
 import cz.kramerius.shared.Dom4jUtils;
 import org.apache.http.auth.AuthScope;
@@ -31,6 +33,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 import static cz.kramerius.searchIndex.indexer.execution.Indexer.*;
 
@@ -42,6 +46,7 @@ public class SolrIndexAccess {
 
     private static HttpSolrClient solrClient;
 
+    private MonitoredSolrBatchUpdater batchUpdater;
 
 
     private final String collection; //because solrClient is buggy and still requires explicit collection-name as a parameter for some operations even though it gets collection-name in the constructor
@@ -135,6 +140,37 @@ public class SolrIndexAccess {
             solrDocList.add(solrInputDoc);
         }
         return solrDocList;
+    }
+
+    public void initBatchUpdater(
+        Consumer<SolrInputDocument> onIndexed,
+        Consumer<List<SolrInputDocument>> onIndexedBatch,
+        BiConsumer<SolrInputDocument, Exception> onFailed
+    ) {
+        KConfiguration Kconfig = KConfiguration.getInstance();
+
+        this.batchUpdater = new MonitoredSolrBatchUpdater(
+            Kconfig.getIndexationSearchBatchSize(),
+            Kconfig.getIndexationSearchThreads(),
+            solrClient,
+            onIndexed,
+            onIndexedBatch,
+            onFailed
+        );
+    }
+
+    public void indexFromXmlStringUsingBatchUpdater(String xmlString) throws SolrServerException, IOException, DocumentException {
+        for (SolrInputDocument doc : extractSolrInputDocuments(new ByteArrayInputStream(xmlString.getBytes()))) {
+            this.batchUpdater.add(doc);
+        }
+    }
+
+    public void flushBatchUpdater() {
+        this.batchUpdater.flush();
+    }
+
+    public void shutdownBatchUpdater() {
+        this.batchUpdater.shutdown();
     }
 
     public UpdateResponse deleteById(String id) throws IOException, SolrServerException {

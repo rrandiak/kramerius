@@ -98,6 +98,7 @@ public class NewIndexerProcessIndexObject {
         Indexer indexer = new Indexer(akubraRepository, solrConfig, System.out, ignoreInconsistentObjects);
         LOGGER.info(" --- PIDS PROCESSING --- ");
         Counters counters = new Counters();
+        indexer.initBatchUpdater(counters);
         try {
             for (int i = 0; i < pids.size(); i++) {
                 String pid = pids.get(i);
@@ -122,6 +123,7 @@ public class NewIndexerProcessIndexObject {
         } catch (RuntimeException e) {
             throw e;
         } finally {
+            indexer.shutdownBatchUpdater();
             indexer.summary(pids, counters);
             indexer.commmit(counters);
         }

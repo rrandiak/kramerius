@@ -218,6 +218,14 @@ public class KConfiguration {
         return getConfiguration().getInt("unmarshallerPoolSize", 16);
     }
 
+    public int getIndexationSearchBatchSize() {
+        return getConfiguration().getInt("indexation.search.batchSize", 100);
+    }
+
+    public int getIndexationSearchThreads() {
+        return getConfiguration().getInt("indexation.search.threads", 4);
+    }
+
     public String getProperty(String key) {
         return allConfigurations.getString(key);
     }
@@ -251,6 +259,11 @@ public class KConfiguration {
 
     public String getApplicationURL() {
         String applicationUrl = getProperty("applicationUrl");
+        return normalizeURL(applicationUrl);
+    }
+
+    public String getProcessManagerURL() {
+        String applicationUrl = getProperty("processManagerUrl");
         return normalizeURL(applicationUrl);
     }
 
